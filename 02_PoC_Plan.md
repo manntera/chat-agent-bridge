@@ -65,39 +65,47 @@ PoC では以下の環境変数のみを使用する。
 
 ### 5.1 中核オブジェクト
 
-ドメインモデルは以下の 2 つの中核オブジェクトで構成される。
+ドメインモデルは以下の 3 つの中核オブジェクトで構成される。
 
 | オブジェクト | 責務 |
 |-------------|------|
 | **Session** | 会話の同一性を管理する（sessionId, workDir）。プロセスには関与しない |
 | **ClaudeProcess** | `claude -p` 子プロセスのライフサイクルを管理する。会話の同一性には関与しない |
+| **Orchestrator** | Session と ClaudeProcess を協調させる調整者。状態遷移の管理と中断待機中の排他制御を担う |
 
 ### 5.2 状態遷移
 
-状態は ClaudeProcess のプロセスの有無で決まる。
+状態は Orchestrator が Session と ClaudeProcess の組み合わせから導出する。
 
 ```
-Idle（プロセスなし）◄────────┐
-    │                          │
-    │  PromptInput             │  プロセス終了（正常/異常）
-    │  → Session.ensure()      │
-    │  → ClaudeProcess.spawn() │
-    ▼                          │
-Busy（プロセスあり）──────────┘
+Initial（セッション未開始）
     │
-    │  !interrupt → ClaudeProcess.interrupt() → プロセス終了
+    │  PromptInput → Session.ensure() → ClaudeProcess.spawn()
     ▼
-Idle（プロセスなし）
+Busy（処理中）◄──────────────────┐
+    │                              │
+    │  プロセス正常/異常終了        │  PromptInput
+    ▼                              │  → ClaudeProcess.spawn()
+Idle（入力待ち）───────────────────┘
+    │
+    │  !new → Session.reset()
+    ▼
+Initial（セッション未開始）
+
+Busy から中断する場合：
+
+Busy ──!new/!interrupt──→ Interrupting ──プロセス終了──→ Idle or Initial
+                           （中断待機中）                  （reason による）
 ```
 
-初回のユーザー入力時に Session.ensure() でセッション ID が自動生成され、以降は同じセッション ID で会話が継続する。
+Interrupting 状態は、interrupt() からプロセス終了までの排他区間として機能し、競合状態を構造的に防止する。
 
 ### 5.3 コマンド
 
 | コマンド | 操作内容 |
 |----------|----------|
-| `!new` | セッション ID をリセットし、新しい会話を開始（Busy 時は中断→待機→リセット） |
-| `!interrupt` | 実行中のプロセスを中断（SIGINT 送信） |
+| `!new` | セッション ID をリセットし、新しい会話を開始（Busy 時は Interrupting を経由） |
+| `!interrupt` | 実行中のプロセスを中断（SIGINT 送信。Busy 時は Interrupting を経由） |
 | （上記以外のテキスト） | ClaudeCode への入力として転送 |
 
 ### 5.4 メッセージ処理フロー
@@ -106,21 +114,22 @@ Idle（プロセスなし）
 Discord メッセージ受信
     │
     ▼
-[Bot 判定] ── Bot のメッセージ → 無視（無限ループ防止）
-    │ 人間のメッセージ
+[Bot 判定] ── Bot のメッセージ → 無視
+    │
     ▼
-[AccessControl] ── 拒否 → 無視（応答なし）
+[AccessControl] ── 拒否 → 無視
     │ 許可
     ▼
-[Command 分類]
-    │
-    ├─ NewCommand ──────→ sessionId なし: 無視
-    │                     Idle: Session.reset()
-    │                     Busy: ClaudeProcess.interrupt() → 終了待機 → Session.reset()
-    ├─ InterruptCommand → Busy なら中断 / Idle なら無視
-    └─ PromptInput ────→ Idle なら Session.ensure() → ClaudeProcess.spawn()
-                          Busy なら「処理中です」応答
+[Orchestrator.handleMessage(text)]
+    ├─ コマンド分類 → 状態判定 → 操作実行
+    └─ 結果をインフラストラクチャ層に通知
+
+プロセス終了時：
+[Orchestrator.onProcessEnd(exitCode)]
+    └─ interruptReason に応じた後処理 → 結果を通知
 ```
+
+詳細な状態遷移表とフロー図は `03_PoC_DomainModel.md` Section 3.5 / 5 を参照。
 
 ---
 

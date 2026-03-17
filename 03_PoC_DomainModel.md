@@ -114,6 +114,74 @@ Discord から届いたテキストを以下のいずれかに分類する。
 | InterruptCommand | `!interrupt` | 実行中のプロセスを中断する |
 | PromptInput | 上記以外のテキスト | ClaudeCode への入力として転送する |
 
+### 3.5 Orchestrator（メッセージ処理の調整者）
+
+Session と ClaudeProcess を協調させ、メッセージ処理の一貫性を保証する中核オブジェクト。AccessControl 通過後のメッセージを受け取り、**コマンド分類 → 状態判定 → 操作実行 → 結果通知**の一連の流れを制御する。
+
+**責務の境界：**
+
+- **やること：** Session と ClaudeProcess の協調、状態遷移の管理、中断待機中の排他制御
+- **やらないこと：** Discord との通信、メッセージ分割、stream-json のパース（これらはインフラストラクチャ層）
+
+**属性：**
+
+| 属性 | 型 | 説明 |
+|------|----|------|
+| session | Session | 会話の同一性を管理するオブジェクト |
+| claudeProcess | ClaudeProcess | プロセスライフサイクルを管理するオブジェクト |
+| interruptReason | `'new'` \| `'interrupt'` \| null | 中断の理由。Interrupting 状態でのみ非 null |
+
+**導出状態：** Orchestrator 自身は明示的な状態変数を持たない。Session と ClaudeProcess の組み合わせから状態が導出される。
+
+| 状態 | 条件 | 意味 |
+|------|------|------|
+| **Initial** | sessionId == null かつ process == null | セッション未開始 |
+| **Idle** | sessionId != null かつ process == null | 入力待ち |
+| **Busy** | process != null かつ interruptReason == null | ClaudeCode 処理中 |
+| **Interrupting** | process != null かつ interruptReason != null | 中断待機中（遷移途中の状態） |
+
+**操作：**
+
+| 操作 | 説明 |
+|------|------|
+| handleMessage(text) | AccessControl 通過後のメッセージを受け取り、コマンド分類・状態判定・操作実行を行う |
+| onProcessEnd(exitCode) | ClaudeProcess 終了時のコールバック。interruptReason に応じた後処理を行う |
+
+**状態遷移表：**
+
+ユーザー入力による遷移：
+
+| 現在の状態 | 入力 | アクション | 遷移先 | 通知 |
+|-----------|------|-----------|--------|------|
+| Initial | PromptInput | Session.ensure() → ClaudeProcess.spawn() | Busy | — |
+| Initial | NewCommand | — | Initial | 「セッションがありません」 |
+| Initial | InterruptCommand | — | Initial | （なし） |
+| Idle | PromptInput | ClaudeProcess.spawn() | Busy | — |
+| Idle | NewCommand | Session.reset() | Initial | 「新しいセッションを開始しました」 |
+| Idle | InterruptCommand | — | Idle | （なし） |
+| Busy | PromptInput | — | Busy | 「処理中です」 |
+| Busy | NewCommand | interruptReason='new', ClaudeProcess.interrupt() | Interrupting | — |
+| Busy | InterruptCommand | interruptReason='interrupt', ClaudeProcess.interrupt() | Interrupting | — |
+| Interrupting | PromptInput | — | Interrupting | 「処理中です」 |
+| Interrupting | NewCommand | — | Interrupting | （なし。既に中断処理中） |
+| Interrupting | InterruptCommand | — | Interrupting | （なし。既に中断処理中） |
+
+プロセス終了による遷移：
+
+| 現在の状態 | イベント | アクション | 遷移先 | 通知 |
+|-----------|---------|-----------|--------|------|
+| Busy | プロセス正常終了 | — | Idle | 結果テキスト |
+| Busy | プロセス異常終了 | — | Idle | エラー情報 |
+| Interrupting | プロセス終了（reason='new'） | Session.reset(), interruptReason=null | Initial | 「新しいセッションを開始しました」 |
+| Interrupting | プロセス終了（reason='interrupt'） | interruptReason=null | Idle | 「中断しました」 |
+
+**補足：** Busy 状態中の途中経過イベント（ツール使用・拡張思考）は状態遷移を起こさず、そのままインフラストラクチャ層に通知される。Interrupting 状態中に到着した途中経過も同様に通知する（プロセスが終了するまで出力は継続しうるため）。
+
+**不変条件：**
+
+- Orchestrator はシステム全体で 1 つだけ存在する（Session と同様）
+- interruptReason が非 null のとき、ClaudeProcess は必ず Busy である
+
 ---
 
 ## 4. ドメインルール
@@ -124,42 +192,63 @@ Discord から届いたテキストを以下のいずれかに分類する。
 
 ### 4.2 処理中の入力拒否
 
-ClaudeProcess が Busy のとき、PromptInput は拒否する。`!interrupt` と `!new` は受け付ける。
+Orchestrator が Busy または Interrupting のとき、PromptInput は拒否する。`!interrupt` と `!new` は Busy のときのみ受け付ける（Interrupting 中は無視する）。
 
 ### 4.3 `!new` の振る舞い
 
-`!new` は Session と ClaudeProcess の状態の組み合わせにより振る舞いが異なる。
+Orchestrator の状態により振る舞いが異なる。
 
-| sessionId | ClaudeProcess | 振る舞い |
-|-----------|---------------|----------|
-| null | Idle | 何もしない。「セッションがありません」と応答 |
-| あり | Idle | Session.reset() → 「新しいセッションを開始しました」と応答 |
-| あり | Busy | ClaudeProcess.interrupt() → **終了を待機** → Session.reset() → 応答 |
+| 状態 | 振る舞い |
+|------|----------|
+| Initial | 何もしない。「セッションがありません」と応答 |
+| Idle | Session.reset() → 「新しいセッションを開始しました」と応答 |
+| Busy | interruptReason='new' を設定 → ClaudeProcess.interrupt() → **Interrupting に遷移** |
+| Interrupting | 無視（既に中断処理中） |
 
-**重要：** Busy 時の `!new` は非同期の 2 段階処理である。interrupt() が返す Promise の解決を待ってから reset() を実行する。
+**重要：** Busy → Interrupting は即座に遷移するが、Session.reset() は**プロセス終了後**に Orchestrator.onProcessEnd() 内で実行される。この 2 段階処理により、プロセスの正常なクリーンアップが保証される。
 
 ### 4.4 `!interrupt` の振る舞い
 
-| ClaudeProcess | 振る舞い |
-|---------------|----------|
-| Idle | 何もしない（応答なし） |
-| Busy | ClaudeProcess.interrupt() → 「中断しました」と応答 |
+| 状態 | 振る舞い |
+|------|----------|
+| Initial / Idle | 何もしない（応答なし） |
+| Busy | interruptReason='interrupt' を設定 → ClaudeProcess.interrupt() → **Interrupting に遷移** |
+| Interrupting | 無視（既に中断処理中） |
 
 ### 4.5 アクセス制御の優先
 
 アクセス制御の判定は、コマンド解析やセッション状態の確認よりも先に行う。許可されないユーザーからのメッセージは、コマンドの種別に関わらず無視する。
 
-### 4.6 プロセス異常終了時の挙動
+### 4.6 プロセス終了時の挙動（Orchestrator.onProcessEnd）
 
-`claude -p` プロセスが異常終了（非ゼロの exit code）した場合：
+プロセス終了時の挙動は Orchestrator の状態と interruptReason の組み合わせで決まる。
 
-1. エラー情報を Discord に送信する
-2. ClaudeProcess は自動的に Idle に戻る（process = null）
-3. Session の sessionId は維持される（次のメッセージで会話を継続可能）
+| 終了時の状態 | interruptReason | 挙動 |
+|-------------|-----------------|------|
+| Busy | null（自然終了） | 正常終了: 結果を通知。異常終了: エラーを通知。sessionId は維持 |
+| Interrupting | 'interrupt' | 「中断しました」を通知。sessionId は維持 |
+| Interrupting | 'new' | Session.reset() を実行 →「新しいセッションを開始しました」を通知 |
+
+いずれの場合も、ClaudeProcess は Idle に戻り、interruptReason は null にリセットされる。
+
+### 4.7 Interrupting 状態による競合状態の防止
+
+Interrupting 状態は、interrupt() 呼び出しからプロセス終了までの間に到着するメッセージを安全に処理するための排他区間として機能する。
+
+- PromptInput → 「処理中です」で拒否
+- NewCommand / InterruptCommand → 無視（既に中断処理中）
+
+これにより、「interrupt 待機中に spawn が走る」「reset 前に新しい入力が処理される」といった競合が構造的に排除される。
+
+**PoC での方針：** Interrupting 状態のチェックは同期的なフラグ判定で実装する。Node.js のシングルスレッドモデルにより、handleMessage() の実行中にプロセス終了コールバックが割り込むことはないため、ロック機構は不要である。
 
 ---
 
 ## 5. メッセージ処理フロー
+
+メッセージ処理は 2 つのフローで構成される。Orchestrator.handleMessage()（同期的な入力処理）と Orchestrator.onProcessEnd()（非同期なプロセス終了処理）である。
+
+### 5.1 handleMessage() フロー
 
 ```
 Discord メッセージ受信
@@ -171,26 +260,58 @@ Discord メッセージ受信
 [AccessControl] ── 拒否 → 無視（応答なし）
     │ 許可
     ▼
-[Command 分類]
+[Orchestrator.handleMessage(text)]
+    │
+    ├─ [Command 分類]
     │
     ├─ NewCommand
-    │      ├─ sessionId == null         → 「セッションがありません」応答
-    │      ├─ sessionId あり & Idle     → Session.reset() → 確認応答
-    │      └─ sessionId あり & Busy     → ClaudeProcess.interrupt()
-    │                                        → 終了待機
-    │                                        → Session.reset() → 確認応答
+    │      ├─ Initial       → 「セッションがありません」通知
+    │      ├─ Idle          → Session.reset() → 「新しいセッションを開始しました」通知
+    │      ├─ Busy          → interruptReason='new'
+    │      │                    → ClaudeProcess.interrupt()
+    │      │                    → 状態: Interrupting（後続は onProcessEnd で処理）
+    │      └─ Interrupting  → 無視
     │
     ├─ InterruptCommand
-    │      ├─ Idle → 無視
-    │      └─ Busy → ClaudeProcess.interrupt() → 「中断しました」応答
+    │      ├─ Initial/Idle  → 無視
+    │      ├─ Busy          → interruptReason='interrupt'
+    │      │                    → ClaudeProcess.interrupt()
+    │      │                    → 状態: Interrupting（後続は onProcessEnd で処理）
+    │      └─ Interrupting  → 無視
     │
     └─ PromptInput
-           ├─ Busy → 「処理中です」応答
-           └─ Idle → Session.ensure()
-                       → ClaudeProcess.spawn(prompt, sessionId, workDir)
-                       → 正常終了: 結果を Discord に送信
-                       → 異常終了: エラーを Discord に送信
+           ├─ Busy/Interrupting → 「処理中です」通知
+           └─ Initial/Idle      → Session.ensure()
+                                    → ClaudeProcess.spawn(prompt, sessionId, workDir)
+                                    → 状態: Busy（後続は onProcessEnd で処理）
 ```
+
+### 5.2 onProcessEnd() フロー
+
+```
+ClaudeProcess 終了（close イベント）
+    │
+    ▼
+[Orchestrator.onProcessEnd(exitCode)]
+    │
+    ├─ interruptReason == null（自然終了）
+    │      ├─ 正常終了 → 結果テキストを通知
+    │      └─ 異常終了 → エラー情報を通知
+    │      → 状態: Idle
+    │
+    ├─ interruptReason == 'interrupt'
+    │      → 「中断しました」通知
+    │      → interruptReason = null
+    │      → 状態: Idle
+    │
+    └─ interruptReason == 'new'
+           → Session.reset()
+           → 「新しいセッションを開始しました」通知
+           → interruptReason = null
+           → 状態: Initial
+```
+
+**補足：** Busy 状態中、ClaudeProcess の stdout から到着する途中経過（ツール使用・拡張思考）は、Orchestrator を経由してインフラストラクチャ層に通知される。これは状態遷移を伴わない。
 
 ---
 
