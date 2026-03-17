@@ -61,37 +61,44 @@ PoC では以下の環境変数のみを使用する。
 
 詳細は `03_PoC_DomainModel.md` を参照。ここでは概要のみ示す。
 
-### 5.1 セッションの状態遷移
+### 5.1 中核オブジェクト
 
-サブプロセス方式では、セッションの状態は **claude プロセスの有無** で決まる。
+ドメインモデルは以下の 2 つの中核オブジェクトで構成される。
+
+| オブジェクト | 責務 |
+|-------------|------|
+| **Session** | 会話の同一性を管理する（sessionId, workDir）。プロセスには関与しない |
+| **ClaudeProcess** | `claude -p` 子プロセスのライフサイクルを管理する。会話の同一性には関与しない |
+
+### 5.2 状態遷移
+
+状態は ClaudeProcess のプロセスの有無で決まる。
 
 ```
-Idle（待機中）◄──────────┐
-    │                      │
-    │  ユーザー入力         │  プロセス終了（正常/異常）
-    │  → claude -p 起動    │
-    ▼                      │
-Busy（処理中）────────────┘
+Idle（プロセスなし）◄────────┐
+    │                          │
+    │  PromptInput             │  プロセス終了（正常/異常）
+    │  → Session.ensure()      │
+    │  → ClaudeProcess.spawn() │
+    ▼                          │
+Busy（プロセスあり）──────────┘
     │
-    │  !interrupt → SIGINT 送信 → プロセス終了
+    │  !interrupt → ClaudeProcess.interrupt() → プロセス終了
     ▼
-Idle（待機中）
+Idle（プロセスなし）
 ```
 
-- **Idle**: プロセスなし。ユーザー入力を受け付ける
-- **Busy**: プロセス実行中。ユーザー入力を拒否（`!interrupt` と `!new` は受付）
+初回のユーザー入力時に Session.ensure() でセッション ID が自動生成され、以降は同じセッション ID で会話が継続する。
 
-初回のユーザー入力時にセッション ID が自動生成され、以降は同じセッション ID で会話が継続する。
-
-### 5.2 コマンド
+### 5.3 コマンド
 
 | コマンド | 操作内容 |
 |----------|----------|
-| `!new` | セッション ID をリセットし、新しい会話を開始 |
+| `!new` | セッション ID をリセットし、新しい会話を開始（Busy 時は中断→待機→リセット） |
 | `!interrupt` | 実行中のプロセスを中断（SIGINT 送信） |
 | （上記以外のテキスト） | ClaudeCode への入力として転送 |
 
-### 5.3 メッセージ処理フロー
+### 5.4 メッセージ処理フロー
 
 ```
 Discord メッセージ受信
@@ -100,11 +107,14 @@ Discord メッセージ受信
 [AccessControl] ── 拒否 → 無視（応答なし）
     │ 許可
     ▼
-[Command判定]
+[Command 分類]
     │
-    ├─ NewCommand ──────→ Busy 中ならプロセスを中断してからセッション ID リセット
+    ├─ NewCommand ──────→ sessionId なし: 無視
+    │                     Idle: Session.reset()
+    │                     Busy: ClaudeProcess.interrupt() → 終了待機 → Session.reset()
     ├─ InterruptCommand → Busy なら中断 / Idle なら無視
-    └─ PromptInput ────→ Idle なら claude -p 起動 / Busy なら「処理中」応答
+    └─ PromptInput ────→ Idle なら Session.ensure() → ClaudeProcess.spawn()
+                          Busy なら「処理中です」応答
 ```
 
 ---
