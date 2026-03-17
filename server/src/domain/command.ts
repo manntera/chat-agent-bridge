@@ -1,7 +1,4 @@
-export type Command =
-  | { type: 'new' }
-  | { type: 'interrupt' }
-  | { type: 'prompt'; text: string };
+export type Command = { type: 'new' } | { type: 'interrupt' } | { type: 'prompt'; text: string };
 
 export function parseCommand(text: string): Command {
   const trimmed = text.trim();

@@ -52,10 +52,7 @@ function toBusy(ctx: ReturnType<typeof createOrchestrator>) {
 }
 
 /** Initial → Busy → Interrupting */
-function toInterrupting(
-  ctx: ReturnType<typeof createOrchestrator>,
-  reason: 'new' | 'interrupt',
-) {
+function toInterrupting(ctx: ReturnType<typeof createOrchestrator>, reason: 'new' | 'interrupt') {
   toBusy(ctx);
   ctx.orchestrator.handleMessage(reason === 'new' ? '!new' : '!interrupt');
   ctx.notifications.length = 0;
