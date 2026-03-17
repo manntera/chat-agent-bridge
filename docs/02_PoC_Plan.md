@@ -125,7 +125,7 @@ Discord メッセージ受信
     └─ 結果をインフラストラクチャ層に通知
 
 プロセス終了時：
-[Orchestrator.onProcessEnd(exitCode)]
+[Orchestrator.onProcessEnd(exitCode, output)]
     └─ interruptReason に応じた後処理 → 結果を通知
 ```
 
