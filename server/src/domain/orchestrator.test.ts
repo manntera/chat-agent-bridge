@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import { Orchestrator } from './orchestrator.js';
 import { Session } from './session.js';
-import type { IClaudeProcess, Notification } from './types.js';
+import type { IClaudeProcess, Notification, ProgressEvent } from './types.js';
 
 // --- テスト用モック ---
 
@@ -330,6 +330,53 @@ describe('Orchestrator', () => {
         type: 'info',
         message: '新しいセッションを開始しました',
       });
+    });
+  });
+
+  // ----- 途中経過の通知 -----
+
+  describe('onProgress（途中経過の通知）', () => {
+    it('Busy 中のツール使用イベントが通知される', () => {
+      const ctx = createOrchestrator();
+      toBusy(ctx);
+
+      const event: ProgressEvent = { kind: 'tool_use', toolName: 'Edit', target: 'src/index.ts' };
+      ctx.orchestrator.onProgress(event);
+
+      expect(ctx.notifications).toHaveLength(1);
+      expect(ctx.notifications[0]).toEqual({ type: 'progress', event });
+    });
+
+    it('Busy 中の拡張思考イベントが通知される', () => {
+      const ctx = createOrchestrator();
+      toBusy(ctx);
+
+      const event: ProgressEvent = { kind: 'thinking', text: 'Let me think about this...' };
+      ctx.orchestrator.onProgress(event);
+
+      expect(ctx.notifications).toHaveLength(1);
+      expect(ctx.notifications[0]).toEqual({ type: 'progress', event });
+    });
+
+    it('Interrupting 中でも途中経過が通知される', () => {
+      const ctx = createOrchestrator();
+      toInterrupting(ctx, 'interrupt');
+
+      const event: ProgressEvent = { kind: 'tool_use', toolName: 'Bash', target: 'npm test' };
+      ctx.orchestrator.onProgress(event);
+
+      expect(ctx.notifications).toHaveLength(1);
+      expect(ctx.notifications[0]).toEqual({ type: 'progress', event });
+    });
+
+    it('途中経過通知は状態遷移を起こさない', () => {
+      const ctx = createOrchestrator();
+      toBusy(ctx);
+
+      ctx.orchestrator.onProgress({ kind: 'tool_use', toolName: 'Edit', target: 'file.ts' });
+      ctx.orchestrator.onProgress({ kind: 'thinking', text: 'thinking...' });
+
+      expect(ctx.orchestrator.state).toBe('busy');
     });
   });
 

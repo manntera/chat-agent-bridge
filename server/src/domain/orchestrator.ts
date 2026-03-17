@@ -1,6 +1,6 @@
 import { parseCommand } from './command.js';
 import type { Session } from './session.js';
-import type { IClaudeProcess, NotifyFn, OrchestratorState } from './types.js';
+import type { IClaudeProcess, NotifyFn, OrchestratorState, ProgressEvent } from './types.js';
 
 export class Orchestrator {
   private interruptReason: 'new' | 'interrupt' | null = null;
@@ -51,6 +51,10 @@ export class Orchestrator {
         }
         break;
     }
+  }
+
+  onProgress(event: ProgressEvent): void {
+    this.notify({ type: 'progress', event });
   }
 
   onProcessEnd(exitCode: number, output: string): void {
