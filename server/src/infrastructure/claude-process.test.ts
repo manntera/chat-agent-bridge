@@ -87,8 +87,10 @@ describe('ClaudeProcess', () => {
       expect(args).toContain('session-123');
       expect(args).toContain('--output-format');
       expect(args).toContain('stream-json');
+      expect(args).toContain('--verbose');
       expect(args).toContain('--dangerously-skip-permissions');
       expect(opts.cwd).toBe('/home/user/project');
+      expect(opts.stdio).toEqual(['ignore', 'pipe', 'pipe']);
     });
 
     it('spawn 後 isRunning が true になる', () => {

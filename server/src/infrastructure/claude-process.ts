@@ -34,9 +34,10 @@ export class ClaudeProcess implements IClaudeProcess {
         sessionId,
         '--output-format',
         'stream-json',
+        '--verbose',
         '--dangerously-skip-permissions',
       ],
-      { cwd: workDir },
+      { cwd: workDir, stdio: ['ignore', 'pipe', 'pipe'] },
     );
 
     this.process = proc;
