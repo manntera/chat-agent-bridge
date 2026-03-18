@@ -36,6 +36,13 @@ const CONFIG = {
 
 function createIntegrationContext() {
   const sentMessages: string[] = [];
+  const threadMessages: string[] = [];
+  const mockThread = {
+    send: vi.fn((content: string) => {
+      threadMessages.push(content);
+      return Promise.resolve();
+    }),
+  };
   const sender = {
     send: vi.fn((content: string) => {
       sentMessages.push(content);
@@ -59,7 +66,7 @@ function createIntegrationContext() {
   });
 
   // インフラオブジェクト + 循環依存の解決
-  const notifier = createNotifier(sender);
+  const discordNotifier = createNotifier(sender);
 
   let onProgress: (event: ProgressEvent) => void = () => {};
   let onProcessEnd: (exitCode: number, output: string) => void = () => {};
@@ -71,15 +78,28 @@ function createIntegrationContext() {
     mockSpawnFn,
   );
 
-  const orchestrator = new Orchestrator(session, claudeProcess, notifier);
+  const orchestrator = new Orchestrator(session, claudeProcess, discordNotifier);
 
   onProgress = (event) => orchestrator.onProgress(event);
   onProcessEnd = (exitCode, output) => orchestrator.onProcessEnd(exitCode, output);
 
   // App 層
-  const handleMessage = createMessageHandler(accessControl, orchestrator);
+  const rawHandleMessage = createMessageHandler(accessControl, orchestrator);
 
-  return { handleMessage, orchestrator, sender, sentMessages, mockSpawnFn, spawnedProcesses };
+  // index.ts と同様、メッセージ処理前に setThreadOrigin を呼ぶ
+  const handleMessage = (msg: DiscordMessage) => {
+    if (!msg.authorBot) {
+      const state = orchestrator.state;
+      if (state === 'initial' || state === 'idle') {
+        discordNotifier.setThreadOrigin({
+          startThread: vi.fn(() => Promise.resolve(mockThread)),
+        });
+      }
+    }
+    rawHandleMessage(msg);
+  };
+
+  return { handleMessage, orchestrator, sender, sentMessages, threadMessages, mockSpawnFn, spawnedProcesses };
 }
 
 function validMessage(content: string): DiscordMessage {
@@ -154,7 +174,7 @@ describe('統合テスト: コンポーネント配線', () => {
   });
 
   describe('途中経過のリアルタイム通知', () => {
-    it('ツール使用イベントが Discord に通知される', () => {
+    it('ツール使用イベントがスレッドに通知される', async () => {
       const ctx = createIntegrationContext();
 
       ctx.handleMessage(validMessage('ファイルを編集して'));
@@ -176,10 +196,12 @@ describe('統合テスト: コンポーネント配線', () => {
         }),
       );
 
-      expect(ctx.sentMessages).toContain('🔧 Edit: src/index.ts');
+      await vi.waitFor(() => {
+        expect(ctx.threadMessages).toContain('🔧 Edit: src/index.ts');
+      });
     });
 
-    it('拡張思考イベントが Discord に通知される', () => {
+    it('拡張思考イベントがスレッドに通知される', async () => {
       const ctx = createIntegrationContext();
 
       ctx.handleMessage(validMessage('分析して'));
@@ -199,7 +221,9 @@ describe('統合テスト: コンポーネント配線', () => {
         }),
       );
 
-      expect(ctx.sentMessages).toContain('💭 コードを分析中...');
+      await vi.waitFor(() => {
+        expect(ctx.threadMessages).toContain('💭 コードを分析中...');
+      });
     });
   });
 

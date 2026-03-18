@@ -99,6 +99,12 @@ async function main(): Promise<void> {
     }
 
     const prevState = orchestrator.state;
+
+    // プロンプト処理時にユーザーのメッセージをスレッドの起点にする
+    if (!msg.author.bot && (prevState === 'initial' || prevState === 'idle')) {
+      discordNotifier.setThreadOrigin(msg);
+    }
+
     handleMessage({
       authorBot: msg.author.bot,
       authorId: msg.author.id,
