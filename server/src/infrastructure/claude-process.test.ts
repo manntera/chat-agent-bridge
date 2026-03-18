@@ -135,6 +135,17 @@ describe('ClaudeProcess', () => {
       expect(args).not.toContain('--effort');
     });
 
+    it('--append-system-prompt でDiscord互換マークダウンの指示が含まれる', () => {
+      const ctx = createTestContext();
+
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
+
+      const args = ctx.mockSpawnFn.mock.calls[0][1];
+      expect(args).toContain('--append-system-prompt');
+      const systemPromptIndex = args.indexOf('--append-system-prompt');
+      expect(args[systemPromptIndex + 1]).toContain('Discord');
+    });
+
     it('spawn 後 isRunning が true になる', () => {
       const ctx = createTestContext();
       expect(ctx.claudeProcess.isRunning).toBe(false);

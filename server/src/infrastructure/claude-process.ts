@@ -4,6 +4,14 @@ import { parseStreamJsonLine } from './stream-json-parser.js';
 
 export type SpawnFn = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
 
+const DISCORD_SYSTEM_PROMPT = `\
+回答のマークダウンはDiscordで表示されます。Discord互換の構文のみ使用してください。
+
+使用可能: **太字** *斜体* ~~取り消し線~~ \`インラインコード\` \`\`\`コードブロック\`\`\` > 引用 >>> 複数行引用 # ## ### 見出し - リスト 1. 番号リスト [リンク](URL) ||スポイラー|| -# 小文字テキスト
+使用禁止: テーブル(| |)、画像(![]()), HTMLタグ、脚注、タスクリスト(- [x])、水平線(---)
+
+テーブルの代わりにリストやコードブロックで情報を整理してください。`;
+
 export class ClaudeProcess implements IClaudeProcess {
   private process: ChildProcess | null = null;
   private killTimer: ReturnType<typeof setTimeout> | null = null;
@@ -48,6 +56,8 @@ export class ClaudeProcess implements IClaudeProcess {
         'stream-json',
         '--verbose',
         '--dangerously-skip-permissions',
+        '--append-system-prompt',
+        DISCORD_SYSTEM_PROMPT,
       ],
       { cwd: workDir, stdio: ['ignore', 'pipe', 'pipe'] },
     );
