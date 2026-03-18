@@ -98,10 +98,13 @@ server/src/
 │
 ├── infrastructure/                       # インフラストラクチャ層（新規作成）
 │   ├── config.ts                         #   環境変数の読み込み・バリデーション
+│   ├── config.test.ts                    #   Config のユニットテスト
 │   ├── stream-json-parser.ts             #   claude CLI の stream-json 出力パーサー
 │   ├── stream-json-parser.test.ts        #   パーサーのユニットテスト
 │   ├── claude-process.ts                 #   IClaudeProcess 実装（child_process）
-│   └── discord-notifier.ts              #   NotifyFn 実装（Discord 送信 + 2000文字分割）
+│   ├── claude-process.test.ts            #   ClaudeProcess のユニットテスト
+│   ├── discord-notifier.ts              #   NotifyFn 実装（Discord 送信 + 2000文字分割）
+│   └── discord-notifier.test.ts         #   DiscordNotifier のユニットテスト
 │
 └── index.ts                              # コンポジションルート（書き換え）
 ```
@@ -240,9 +243,15 @@ export function parseStreamJsonLine(line: string): ParsedEvent;
 #### 3.3.1 クラス設計
 
 ```typescript
-import { spawn, type ChildProcess } from 'node:child_process';
+import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
 import type { IClaudeProcess, ProgressEvent } from '../domain/types.js';
 import { parseStreamJsonLine } from './stream-json-parser.js';
+
+export type SpawnFn = (
+  command: string,
+  args: string[],
+  options: SpawnOptions,
+) => ChildProcess;
 
 export class ClaudeProcess implements IClaudeProcess {
   private process: ChildProcess | null = null;
@@ -252,6 +261,7 @@ export class ClaudeProcess implements IClaudeProcess {
     private readonly claudePath: string,
     private readonly onProgress: (event: ProgressEvent) => void,
     private readonly onProcessEnd: (exitCode: number, output: string) => void,
+    private readonly spawnFn: SpawnFn = nodeSpawn,
   ) {}
 
   get isRunning(): boolean {
@@ -262,6 +272,8 @@ export class ClaudeProcess implements IClaudeProcess {
   interrupt(): void { ... }
 }
 ```
+
+**テスタビリティのための設計判断：** `spawnFn` をコンストラクタの最終引数として注入可能にし、デフォルト値に `node:child_process` の `spawn` を設定する。本番コードは引数を省略してそのまま使い、テストコードではモック関数を注入することで、実際のプロセスを起動せずにライフサイクル管理ロジックを検証できる。
 
 #### 3.3.2 spawn() の処理フロー
 
@@ -366,13 +378,18 @@ ClaudeProcess                          Orchestrator
 #### 3.4.1 公開インターフェース
 
 ```typescript
-import type { TextChannel } from 'discord.js';
 import type { NotifyFn } from '../domain/types.js';
 
-export function createNotifier(channel: TextChannel): NotifyFn;
+export interface MessageSender {
+  send(content: string): Promise<unknown>;
+}
+
+export function createNotifier(sender: MessageSender): NotifyFn;
 ```
 
 クラスではなくファクトリ関数で実装する。`NotifyFn` 型（`(notification: Notification) => void`）は単一の関数シグネチャであり、クラスにする必要がない。
+
+**テスタビリティのための設計判断：** discord.js の `TextChannel` に直接依存せず、`send()` メソッドのみを持つ最小インターフェース `MessageSender` を定義する。discord.js の `TextChannel` はこのインターフェースを構造的に満たすため、本番コードではそのまま渡せる。テストコードでは `{ send: vi.fn() }` のようなシンプルなモックで検証できる。
 
 #### 3.4.2 通知フォーマット
 
@@ -415,10 +432,10 @@ function splitMessage(text: string, maxLength = 2000): string[] {
 `NotifyFn` の型は `(notification: Notification) => void` であり、戻り値は `void`（`Promise<void>` ではない）。一方、discord.js の `channel.send()` は `Promise` を返す。
 
 ```typescript
-channel.send(chunk).catch((err) => console.error('Discord send error:', err));
+sender.send(chunk).catch((err) => console.error('Discord send error:', err));
 ```
 
-`channel.send()` の Promise は await せず、エラーのみ `.catch()` でログ出力する fire-and-forget パターンを採用する。
+`sender.send()` の Promise は await せず、エラーのみ `.catch()` でログ出力する fire-and-forget パターンを採用する。
 
 **この設計の理由：**
 
@@ -456,8 +473,8 @@ main()
     │      └─ AccessControl({ allowedUserIds, channelId })
     │
     ├─ 7. インフラオブジェクトを生成・配線（後述）
-    │      ├─ createNotifier(channel) → NotifyFn
-    │      ├─ ClaudeProcess(claudePath, onProgress, onProcessEnd)
+    │      ├─ createNotifier(channel) → NotifyFn  // TextChannel は MessageSender を満たす
+    │      ├─ ClaudeProcess(claudePath, onProgress, onProcessEnd)  // spawnFn はデフォルト値
     │      └─ Orchestrator(session, claudeProcess, notify)
     │
     └─ 8. MessageCreate イベントハンドラを登録
@@ -619,15 +636,15 @@ pnpm add discord.js dotenv
 
 ### 6.1 テスト対象の選定
 
-| コンポーネント | テスト | 理由 |
-|---------------|--------|------|
-| `stream-json-parser.ts` | ユニットテストあり | 純粋関数。外部システム依存なし。stream-json の形式が変更された場合に即座に検知する必要がある |
-| `config.ts` | テストなし | `process.env` の読み取りとバリデーションのみ。ロジックが十分に単純 |
-| `claude-process.ts` | テストなし | `child_process.spawn()` に依存。PoC ではモック作成のコストに見合わない |
-| `discord-notifier.ts` | テストなし | discord.js の `TextChannel` に依存。フォーマットロジックが十分に単純 |
+| コンポーネント | テスト | テスト手法 |
+|---------------|--------|-----------|
+| `stream-json-parser.ts` | ユニットテストあり | 純粋関数への入出力テスト |
+| `config.ts` | ユニットテストあり | テスト前後で `process.env` を操作して検証 |
+| `claude-process.ts` | ユニットテストあり | `SpawnFn` にモック関数を注入し、プロセスライフサイクルを検証 |
+| `discord-notifier.ts` | ユニットテストあり | `MessageSender` にモックを注入し、フォーマット・分割ロジックを検証 |
 | `index.ts` | テストなし | コンポジションルート。手動 E2E テストで検証 |
 
-> **設計判断：** ドメイン層は Orchestrator を含め 50 以上のテストケースで網羅されている。インフラストラクチャ層は「薄いグルーコード」であり、PoC では stream-json パーサーのみをテスト対象とする。その他のコンポーネントは、PoC 完了条件（`02_PoC_Plan.md` Section 6）に基づく手動 E2E テストで検証する。
+> **設計判断：** インフラストラクチャ層の各コンポーネントは、外部依存（`child_process.spawn()`、`TextChannel`）を注入可能なインターフェースに置き換えることで、実際の外部システムなしにユニットテストできる設計とした。`index.ts`（コンポジションルート）のみ手動 E2E テストで検証する。
 
 ### 6.2 E2E テスト手順
 
