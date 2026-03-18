@@ -13,6 +13,7 @@ class MockChildProcess extends EventEmitter {
   pid = 1234;
   killed = false;
 
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   kill(signal?: string): boolean {
     this.killed = true;
     return true;
@@ -24,7 +25,8 @@ function createTestContext() {
   const endCalls: Array<{ exitCode: number; output: string }> = [];
   const spawnedProcesses: MockChildProcess[] = [];
 
-  const mockSpawnFn = vi.fn((_cmd: string, _args: string[], _opts: SpawnOptions) => {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const mockSpawnFn = vi.fn((...args: [string, string[], SpawnOptions]) => {
     const proc = new MockChildProcess();
     spawnedProcesses.push(proc);
     return proc as unknown as ChildProcess;
@@ -156,10 +158,7 @@ describe('ClaudeProcess', () => {
       ctx.claudeProcess.spawn('hello', 'session-123', '/work');
       const proc = latestProcess(ctx);
 
-      sendStdout(
-        proc,
-        JSON.stringify({ type: 'result', result: '回答テキスト' }),
-      );
+      sendStdout(proc, JSON.stringify({ type: 'result', result: '回答テキスト' }));
       simulateClose(proc, 0);
 
       expect(ctx.endCalls).toHaveLength(1);
@@ -171,10 +170,7 @@ describe('ClaudeProcess', () => {
       ctx.claudeProcess.spawn('hello', 'session-123', '/work');
       const proc = latestProcess(ctx);
 
-      sendStdout(
-        proc,
-        JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc' }),
-      );
+      sendStdout(proc, JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc' }));
 
       expect(ctx.progressEvents).toHaveLength(0);
     });
