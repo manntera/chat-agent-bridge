@@ -1,6 +1,12 @@
-import { parseCommand } from './command.js';
 import type { Session } from './session.js';
-import type { IClaudeProcess, NotifyFn, OrchestratorState, ProgressEvent, SessionOptions } from './types.js';
+import type {
+  Command,
+  IClaudeProcess,
+  NotifyFn,
+  OrchestratorState,
+  ProgressEvent,
+  SessionOptions,
+} from './types.js';
 
 export class Orchestrator {
   private interruptReason: 'new' | 'interrupt' | null = null;
@@ -19,21 +25,32 @@ export class Orchestrator {
     return this.session.sessionId !== null ? 'idle' : 'initial';
   }
 
+  /** テキストメッセージをプロンプトとして処理する */
   handleMessage(text: string): void {
-    const command = parseCommand(text);
+    this.handleCommand({ type: 'prompt', text: text.trim() });
+  }
+
+  /** パース済みコマンドを処理する */
+  handleCommand(command: Command): void {
     const state = this.state;
 
     switch (command.type) {
       case 'prompt':
         if (state === 'initial') {
-          this.notify({ type: 'info', message: '`!new` でセッションを開始してください' });
+          this.notify({ type: 'info', message: '`/cc new` でセッションを開始してください' });
         } else if (state === 'busy' || state === 'interrupting') {
           this.notify({ type: 'info', message: '処理中です' });
         } else {
           const sessionId = this.session.sessionId!;
           const resume = !this.session.isNew;
           this.session.markUsed();
-          this.claudeProcess.spawn(command.text, sessionId, this.session.workDir, resume, this.session.options);
+          this.claudeProcess.spawn(
+            command.text,
+            sessionId,
+            this.session.workDir,
+            resume,
+            this.session.options,
+          );
         }
         break;
 

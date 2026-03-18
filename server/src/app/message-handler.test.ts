@@ -2,19 +2,31 @@ import { describe, it, expect } from 'vitest';
 import { AccessControl } from '../domain/access-control.js';
 import { Orchestrator } from '../domain/orchestrator.js';
 import { Session } from '../domain/session.js';
-import type { IClaudeProcess, Notification } from '../domain/types.js';
+import type { IClaudeProcess, Notification, SessionOptions } from '../domain/types.js';
 import { createMessageHandler } from './message-handler.js';
 
 // --- テスト用モック ---
 
 class MockClaudeProcess implements IClaudeProcess {
   isRunning = false;
-  spawnCalls: Array<{ prompt: string; sessionId: string; workDir: string; resume: boolean }> = [];
+  spawnCalls: Array<{
+    prompt: string;
+    sessionId: string;
+    workDir: string;
+    resume: boolean;
+    options?: SessionOptions;
+  }> = [];
   interruptCalls = 0;
 
-  spawn(prompt: string, sessionId: string, workDir: string, resume: boolean): void {
+  spawn(
+    prompt: string,
+    sessionId: string,
+    workDir: string,
+    resume: boolean,
+    options?: SessionOptions,
+  ): void {
     this.isRunning = true;
-    this.spawnCalls.push({ prompt, sessionId, workDir, resume });
+    this.spawnCalls.push({ prompt, sessionId, workDir, resume, options });
   }
 
   interrupt(): void {
@@ -106,45 +118,42 @@ describe('createMessageHandler', () => {
     });
   });
 
-  // ----- Orchestrator への委譲 -----
+  // ----- プロンプトとしての処理 -----
 
-  describe('Orchestrator への委譲', () => {
-    it('許可されたメッセージは Orchestrator.handleMessage に渡される', () => {
-      const { handler, mockProcess } = createTestContext();
+  describe('プロンプトとしての処理', () => {
+    it('セッション開始前のメッセージはセッション開始を促す', () => {
+      const { handler, notifications } = createTestContext();
 
-      handler(validMessage('!new'));
+      handler(validMessage('hello'));
+
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0]).toEqual({
+        type: 'info',
+        message: '`/cc new` でセッションを開始してください',
+      });
+    });
+
+    it('セッション開始後のメッセージは Orchestrator に渡される', () => {
+      const { handler, orchestrator, mockProcess } = createTestContext();
+
+      orchestrator.handleCommand({ type: 'new', options: {} });
       handler(validMessage('hello'));
 
       expect(mockProcess.spawnCalls).toHaveLength(1);
       expect(mockProcess.spawnCalls[0].prompt).toBe('hello');
     });
 
-    it('コマンドメッセージも正しく Orchestrator に委譲される', () => {
-      const { handler, mockProcess } = createTestContext();
-
-      handler(validMessage('!new'));
-      handler(validMessage('some task'));
-      expect(mockProcess.spawnCalls).toHaveLength(1);
-
-      handler(validMessage('!interrupt'));
-
-      expect(mockProcess.interruptCalls).toBe(1);
-    });
-
     it('複数メッセージが順番に処理される', () => {
       const { handler, orchestrator, mockProcess } = createTestContext();
 
-      handler(validMessage('!new'));
+      orchestrator.handleCommand({ type: 'new', options: {} });
 
-      // 1つ目のメッセージ → Busy
       handler(validMessage('first task'));
       expect(mockProcess.spawnCalls).toHaveLength(1);
 
-      // プロセス終了 → Idle
       mockProcess.simulateEnd();
       orchestrator.onProcessEnd(0, 'result');
 
-      // 2つ目のメッセージ → 再び Busy
       handler(validMessage('second task'));
       expect(mockProcess.spawnCalls).toHaveLength(2);
       expect(mockProcess.spawnCalls[1].prompt).toBe('second task');

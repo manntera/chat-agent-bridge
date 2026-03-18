@@ -172,7 +172,12 @@ describe('ClaudeProcess', () => {
             type: 'message',
             role: 'assistant',
             content: [
-              { type: 'tool_use', id: 'toolu_1', name: 'Edit', input: { file_path: 'src/index.ts' } },
+              {
+                type: 'tool_use',
+                id: 'toolu_1',
+                name: 'Edit',
+                input: { file_path: 'src/index.ts' },
+              },
             ],
           },
         }),

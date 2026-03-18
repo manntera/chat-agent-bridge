@@ -7,6 +7,11 @@ export interface SessionOptions {
   effort?: Effort;
 }
 
+export type Command =
+  | { type: 'new'; options: SessionOptions }
+  | { type: 'interrupt' }
+  | { type: 'prompt'; text: string };
+
 export type ProgressEvent =
   | { kind: 'tool_use'; toolName: string; target: string }
   | { kind: 'thinking'; text: string };
@@ -21,6 +26,12 @@ export type NotifyFn = (notification: Notification) => void;
 
 export interface IClaudeProcess {
   readonly isRunning: boolean;
-  spawn(prompt: string, sessionId: string, workDir: string, resume: boolean, options?: SessionOptions): void;
+  spawn(
+    prompt: string,
+    sessionId: string,
+    workDir: string,
+    resume: boolean,
+    options?: SessionOptions,
+  ): void;
   interrupt(): void;
 }

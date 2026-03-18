@@ -45,7 +45,9 @@ function formatNotification(notification: Notification): string[] {
   }
 }
 
-export function createNotifier(channel: ChannelSender): NotifyFn & { setThreadOrigin(message: Threadable): void } {
+export function createNotifier(
+  channel: ChannelSender,
+): NotifyFn & { setThreadOrigin(message: Threadable): void } {
   let threadPromise: Promise<ThreadSender> | null = null;
   let pendingOrigin: Threadable | null = null;
 

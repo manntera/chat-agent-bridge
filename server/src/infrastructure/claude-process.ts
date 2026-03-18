@@ -19,15 +19,19 @@ export class ClaudeProcess implements IClaudeProcess {
     return this.process !== null;
   }
 
-  spawn(prompt: string, sessionId: string, workDir: string, resume: boolean, options: SessionOptions = {}): void {
+  spawn(
+    prompt: string,
+    sessionId: string,
+    workDir: string,
+    resume: boolean,
+    options: SessionOptions = {},
+  ): void {
     if (this.process !== null) return;
 
     let resultText = '';
     let buffer = '';
 
-    const sessionArgs = resume
-      ? ['--resume', sessionId]
-      : ['--session-id', sessionId];
+    const sessionArgs = resume ? ['--resume', sessionId] : ['--session-id', sessionId];
 
     const optionArgs: string[] = [];
     if (options.model) optionArgs.push('--model', options.model);

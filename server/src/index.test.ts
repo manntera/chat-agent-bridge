@@ -88,18 +88,23 @@ function createIntegrationContext() {
 
   // index.ts と同様、メッセージ処理前に setThreadOrigin を呼ぶ
   const handleMessage = (msg: DiscordMessage) => {
-    if (!msg.authorBot) {
-      const state = orchestrator.state;
-      if (state === 'initial' || state === 'idle') {
-        discordNotifier.setThreadOrigin({
-          startThread: vi.fn(() => Promise.resolve(mockThread)),
-        });
-      }
+    if (!msg.authorBot && orchestrator.state === 'idle') {
+      discordNotifier.setThreadOrigin({
+        startThread: vi.fn(() => Promise.resolve(mockThread)),
+      });
     }
     rawHandleMessage(msg);
   };
 
-  return { handleMessage, orchestrator, sender, sentMessages, threadMessages, mockSpawnFn, spawnedProcesses };
+  return {
+    handleMessage,
+    orchestrator,
+    sender,
+    sentMessages,
+    threadMessages,
+    mockSpawnFn,
+    spawnedProcesses,
+  };
 }
 
 function validMessage(content: string): DiscordMessage {
@@ -127,7 +132,7 @@ describe('統合テスト: コンポーネント配線', () => {
     it('許可されたメッセージが ClaudeCode に送信され、結果が通知される', () => {
       const ctx = createIntegrationContext();
 
-      ctx.handleMessage(validMessage('!new'));
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.handleMessage(validMessage('テストを書いて'));
 
       // ClaudeProcess が起動されている
@@ -147,7 +152,7 @@ describe('統合テスト: コンポーネント配線', () => {
     it('連続したメッセージが同一セッションで処理される', () => {
       const ctx = createIntegrationContext();
 
-      ctx.handleMessage(validMessage('!new'));
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
 
       // 1つ目のメッセージ
       ctx.handleMessage(validMessage('最初のタスク'));
@@ -180,7 +185,7 @@ describe('統合テスト: コンポーネント配線', () => {
     it('ツール使用イベントがスレッドに通知される', async () => {
       const ctx = createIntegrationContext();
 
-      ctx.handleMessage(validMessage('!new'));
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.handleMessage(validMessage('ファイルを編集して'));
       const proc = latestProcess(ctx);
 
@@ -194,7 +199,12 @@ describe('統合テスト: コンポーネント配線', () => {
             type: 'message',
             role: 'assistant',
             content: [
-              { type: 'tool_use', id: 'toolu_1', name: 'Edit', input: { file_path: 'src/index.ts' } },
+              {
+                type: 'tool_use',
+                id: 'toolu_1',
+                name: 'Edit',
+                input: { file_path: 'src/index.ts' },
+              },
             ],
           },
         }),
@@ -208,7 +218,7 @@ describe('統合テスト: コンポーネント配線', () => {
     it('拡張思考イベントがスレッドに通知される', async () => {
       const ctx = createIntegrationContext();
 
-      ctx.handleMessage(validMessage('!new'));
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.handleMessage(validMessage('分析して'));
       const proc = latestProcess(ctx);
 
@@ -266,22 +276,22 @@ describe('統合テスト: コンポーネント配線', () => {
     it('処理中に入力すると「処理中です」と通知される', () => {
       const ctx = createIntegrationContext();
 
-      ctx.handleMessage(validMessage('!new'));
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.handleMessage(validMessage('長い処理'));
       ctx.handleMessage(validMessage('もう一つ'));
 
       expect(ctx.sentMessages).toContain('処理中です');
     });
 
-    it('!interrupt でプロセスが中断される', () => {
+    it('/cc interrupt でプロセスが中断される', () => {
       const ctx = createIntegrationContext();
 
-      ctx.handleMessage(validMessage('!new'));
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.handleMessage(validMessage('長い処理'));
       const proc = latestProcess(ctx);
       const killSpy = vi.spyOn(proc, 'kill');
 
-      ctx.handleMessage(validMessage('!interrupt'));
+      ctx.orchestrator.handleCommand({ type: 'interrupt' });
 
       expect(killSpy).toHaveBeenCalledWith('SIGINT');
 
@@ -291,18 +301,18 @@ describe('統合テスト: コンポーネント配線', () => {
       expect(ctx.sentMessages).toContain('中断しました');
     });
 
-    it('!new でセッションがリセットされ、新しいセッションで再開できる', () => {
+    it('/cc new でセッションがリセットされ、新しいセッションで再開できる', () => {
       const ctx = createIntegrationContext();
 
       // セッションを開始
-      ctx.handleMessage(validMessage('!new'));
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.handleMessage(validMessage('最初のタスク'));
       const proc1 = latestProcess(ctx);
       sendStdout(proc1, JSON.stringify({ type: 'result', result: '結果' }));
       simulateClose(proc1, 0);
 
-      // !new でリセット
-      ctx.handleMessage(validMessage('!new'));
+      // /cc new でリセット
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       expect(ctx.sentMessages).toContain('新しいセッションを開始しました');
 
       // 新しいセッションでメッセージを送信
@@ -329,7 +339,7 @@ describe('統合テスト: コンポーネント配線', () => {
     it('ClaudeCode が異常終了した場合、エラーが通知される', () => {
       const ctx = createIntegrationContext();
 
-      ctx.handleMessage(validMessage('!new'));
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.handleMessage(validMessage('hello'));
       const proc = latestProcess(ctx);
 

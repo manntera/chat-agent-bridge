@@ -7,11 +7,22 @@ import type { IClaudeProcess, Notification, ProgressEvent, SessionOptions } from
 
 class MockClaudeProcess implements IClaudeProcess {
   isRunning = false;
-  spawnCalls: Array<{ prompt: string; sessionId: string; workDir: string; resume: boolean; options?: SessionOptions }> =
-    [];
+  spawnCalls: Array<{
+    prompt: string;
+    sessionId: string;
+    workDir: string;
+    resume: boolean;
+    options?: SessionOptions;
+  }> = [];
   interruptCalls = 0;
 
-  spawn(prompt: string, sessionId: string, workDir: string, resume: boolean, options?: SessionOptions): void {
+  spawn(
+    prompt: string,
+    sessionId: string,
+    workDir: string,
+    resume: boolean,
+    options?: SessionOptions,
+  ): void {
     this.isRunning = true;
     this.spawnCalls.push({ prompt, sessionId, workDir, resume, options });
   }
@@ -40,7 +51,7 @@ function createOrchestrator() {
 
 /** Initial → Idle（!new でセッション作成） */
 function toIdle(ctx: ReturnType<typeof createOrchestrator>) {
-  ctx.orchestrator.handleMessage('!new');
+  ctx.orchestrator.handleCommand({ type: 'new', options: {} });
   ctx.notifications.length = 0;
 }
 
@@ -62,7 +73,9 @@ function toIdleAfterTask(ctx: ReturnType<typeof createOrchestrator>) {
 /** Initial → Idle → Busy → Interrupting */
 function toInterrupting(ctx: ReturnType<typeof createOrchestrator>, reason: 'new' | 'interrupt') {
   toBusy(ctx);
-  ctx.orchestrator.handleMessage(reason === 'new' ? '!new' : '!interrupt');
+  ctx.orchestrator.handleCommand(
+    reason === 'new' ? { type: 'new', options: {} } : { type: 'interrupt' },
+  );
   ctx.notifications.length = 0;
 }
 
@@ -111,14 +124,14 @@ describe('Orchestrator', () => {
       expect(notifications).toHaveLength(1);
       expect(notifications[0]).toEqual({
         type: 'info',
-        message: '`!new` でセッションを開始してください',
+        message: '`/cc new` でセッションを開始してください',
       });
     });
 
     it('NewCommand → セッション作成 + 通知 → Idle', () => {
       const { orchestrator, session, notifications } = createOrchestrator();
 
-      orchestrator.handleMessage('!new');
+      orchestrator.handleCommand({ type: 'new', options: {} });
 
       expect(orchestrator.state).toBe('idle');
       expect(session.sessionId).not.toBeNull();
@@ -132,7 +145,7 @@ describe('Orchestrator', () => {
     it('InterruptCommand → 何もしない, Initial 維持', () => {
       const { orchestrator, notifications } = createOrchestrator();
 
-      orchestrator.handleMessage('!interrupt');
+      orchestrator.handleCommand({ type: 'interrupt' });
 
       expect(orchestrator.state).toBe('initial');
       expect(notifications).toHaveLength(0);
@@ -183,7 +196,7 @@ describe('Orchestrator', () => {
       toIdle(ctx);
       const oldSessionId = ctx.session.sessionId;
 
-      ctx.orchestrator.handleMessage('!new');
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
 
       expect(ctx.orchestrator.state).toBe('idle');
       expect(ctx.session.sessionId).not.toBeNull();
@@ -199,7 +212,7 @@ describe('Orchestrator', () => {
       const ctx = createOrchestrator();
       toIdle(ctx);
 
-      ctx.orchestrator.handleMessage('!interrupt');
+      ctx.orchestrator.handleCommand({ type: 'interrupt' });
 
       expect(ctx.orchestrator.state).toBe('idle');
       expect(ctx.notifications).toHaveLength(0);
@@ -225,7 +238,7 @@ describe('Orchestrator', () => {
       const ctx = createOrchestrator();
       toBusy(ctx);
 
-      ctx.orchestrator.handleMessage('!new');
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
 
       expect(ctx.orchestrator.state).toBe('interrupting');
       expect(ctx.mockProcess.interruptCalls).toBe(1);
@@ -235,7 +248,7 @@ describe('Orchestrator', () => {
       const ctx = createOrchestrator();
       toBusy(ctx);
 
-      ctx.orchestrator.handleMessage('!interrupt');
+      ctx.orchestrator.handleCommand({ type: 'interrupt' });
 
       expect(ctx.orchestrator.state).toBe('interrupting');
       expect(ctx.mockProcess.interruptCalls).toBe(1);
@@ -260,7 +273,7 @@ describe('Orchestrator', () => {
       const ctx = createOrchestrator();
       toInterrupting(ctx, 'interrupt');
 
-      ctx.orchestrator.handleMessage('!new');
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
 
       expect(ctx.orchestrator.state).toBe('interrupting');
       expect(ctx.notifications).toHaveLength(0);
@@ -271,7 +284,7 @@ describe('Orchestrator', () => {
       const ctx = createOrchestrator();
       toInterrupting(ctx, 'new');
 
-      ctx.orchestrator.handleMessage('!interrupt');
+      ctx.orchestrator.handleCommand({ type: 'interrupt' });
 
       expect(ctx.orchestrator.state).toBe('interrupting');
       expect(ctx.notifications).toHaveLength(0);
@@ -417,10 +430,10 @@ describe('Orchestrator', () => {
   // ----- セッションオプション -----
 
   describe('セッションオプション', () => {
-    it('!new にオプションを指定すると通知メッセージに含まれる', () => {
+    it('/cc new にオプションを指定すると通知メッセージに含まれる', () => {
       const { orchestrator, notifications } = createOrchestrator();
 
-      orchestrator.handleMessage('!new --model sonnet --effort max');
+      orchestrator.handleCommand({ type: 'new', options: { model: 'sonnet', effort: 'max' } });
 
       expect(notifications).toHaveLength(1);
       expect(notifications[0]).toEqual({
@@ -429,10 +442,10 @@ describe('Orchestrator', () => {
       });
     });
 
-    it('!new のオプションが Session に保存される', () => {
+    it('/cc new のオプションが Session に保存される', () => {
       const { orchestrator, session } = createOrchestrator();
 
-      orchestrator.handleMessage('!new --model opus --effort high');
+      orchestrator.handleCommand({ type: 'new', options: { model: 'opus', effort: 'high' } });
 
       expect(session.options).toEqual({ model: 'opus', effort: 'high' });
     });
@@ -440,7 +453,7 @@ describe('Orchestrator', () => {
     it('オプションが spawn に渡される', () => {
       const ctx = createOrchestrator();
 
-      ctx.orchestrator.handleMessage('!new --model sonnet max');
+      ctx.orchestrator.handleCommand({ type: 'new', options: { model: 'sonnet', effort: 'max' } });
       ctx.orchestrator.handleMessage('hello');
 
       expect(ctx.mockProcess.spawnCalls[0].options).toEqual({ model: 'sonnet', effort: 'max' });
@@ -449,7 +462,7 @@ describe('Orchestrator', () => {
     it('オプションなしの !new では空オプション', () => {
       const { orchestrator, session } = createOrchestrator();
 
-      orchestrator.handleMessage('!new');
+      orchestrator.handleCommand({ type: 'new', options: {} });
 
       expect(session.options).toEqual({});
     });
@@ -457,12 +470,12 @@ describe('Orchestrator', () => {
     it('Busy 中の !new オプションが中断後の新セッションに引き継がれる', () => {
       const ctx = createOrchestrator();
 
-      ctx.orchestrator.handleMessage('!new');
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.orchestrator.handleMessage('task');
       ctx.notifications.length = 0;
 
       // Busy 中に !new --model sonnet
-      ctx.orchestrator.handleMessage('!new --model sonnet max');
+      ctx.orchestrator.handleCommand({ type: 'new', options: { model: 'sonnet', effort: 'max' } });
       expect(ctx.orchestrator.state).toBe('interrupting');
 
       // プロセス終了 → 新セッション
@@ -484,7 +497,7 @@ describe('Orchestrator', () => {
       const ctx = createOrchestrator();
 
       // !new → Idle
-      ctx.orchestrator.handleMessage('!new');
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       expect(ctx.orchestrator.state).toBe('idle');
       const firstSessionId = ctx.session.sessionId;
 
@@ -508,19 +521,19 @@ describe('Orchestrator', () => {
       expect(ctx.orchestrator.state).toBe('idle');
 
       // !new → Idle（新しいセッション）
-      ctx.orchestrator.handleMessage('!new');
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       expect(ctx.orchestrator.state).toBe('idle');
       expect(ctx.session.sessionId).not.toBe(firstSessionId);
     });
 
-    it('Busy 中に !interrupt: Busy → Interrupting → Idle', () => {
+    it('Busy 中に /cc interrupt: Busy → Interrupting → Idle', () => {
       const ctx = createOrchestrator();
 
       toIdle(ctx);
       ctx.orchestrator.handleMessage('long task');
       expect(ctx.orchestrator.state).toBe('busy');
 
-      ctx.orchestrator.handleMessage('!interrupt');
+      ctx.orchestrator.handleCommand({ type: 'interrupt' });
       expect(ctx.orchestrator.state).toBe('interrupting');
 
       ctx.mockProcess.simulateEnd();
@@ -537,7 +550,7 @@ describe('Orchestrator', () => {
       const oldSessionId = ctx.session.sessionId;
       expect(ctx.orchestrator.state).toBe('busy');
 
-      ctx.orchestrator.handleMessage('!new');
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       expect(ctx.orchestrator.state).toBe('interrupting');
 
       ctx.mockProcess.simulateEnd();
@@ -546,7 +559,7 @@ describe('Orchestrator', () => {
       expect(ctx.session.sessionId).not.toBe(oldSessionId);
     });
 
-    it('!new 後に新しい会話を開始できる', () => {
+    it('/cc new 後に新しい会話を開始できる', () => {
       const ctx = createOrchestrator();
 
       // 最初の会話
@@ -557,7 +570,7 @@ describe('Orchestrator', () => {
       ctx.orchestrator.onProcessEnd(0, 'result 1');
 
       // リセット + 新セッション
-      ctx.orchestrator.handleMessage('!new');
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       expect(ctx.session.sessionId).not.toBe(firstSessionId);
 
       // 新しい会話
@@ -585,8 +598,8 @@ describe('Orchestrator', () => {
       toInterrupting(ctx, 'interrupt');
 
       ctx.orchestrator.handleMessage('prompt');
-      ctx.orchestrator.handleMessage('!new');
-      ctx.orchestrator.handleMessage('!interrupt');
+      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
+      ctx.orchestrator.handleCommand({ type: 'interrupt' });
       ctx.orchestrator.handleMessage('another prompt');
 
       expect(ctx.orchestrator.state).toBe('interrupting');
