@@ -27,8 +27,9 @@ export class Orchestrator {
         if (state === 'busy' || state === 'interrupting') {
           this.notify({ type: 'info', message: '処理中です' });
         } else {
+          const resume = state === 'idle';
           const sessionId = this.session.ensure();
-          this.claudeProcess.spawn(command.text, sessionId, this.session.workDir);
+          this.claudeProcess.spawn(command.text, sessionId, this.session.workDir, resume);
         }
         break;
 

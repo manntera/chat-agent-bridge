@@ -136,15 +136,13 @@ describe('統合テスト: コンポーネント配線', () => {
       ctx.handleMessage(validMessage('次のタスク'));
       const proc2 = latestProcess(ctx);
 
-      // 同じ session-id が使われている
-      const sessionId1 =
-        ctx.mockSpawnFn.mock.calls[0][1][
-          ctx.mockSpawnFn.mock.calls[0][1].indexOf('--session-id') + 1
-        ];
-      const sessionId2 =
-        ctx.mockSpawnFn.mock.calls[1][1][
-          ctx.mockSpawnFn.mock.calls[1][1].indexOf('--session-id') + 1
-        ];
+      // 1回目は --session-id、2回目は --resume で同じ ID が使われている
+      const args1 = ctx.mockSpawnFn.mock.calls[0][1];
+      const args2 = ctx.mockSpawnFn.mock.calls[1][1];
+      const sessionId1 = args1[args1.indexOf('--session-id') + 1];
+      const sessionId2 = args2[args2.indexOf('--resume') + 1];
+      expect(args1).toContain('--session-id');
+      expect(args2).toContain('--resume');
       expect(sessionId1).toBe(sessionId2);
 
       sendStdout(proc2, JSON.stringify({ type: 'result', result: '結果2' }));
@@ -166,8 +164,15 @@ describe('統合テスト: コンポーネント配線', () => {
         proc,
         JSON.stringify({
           type: 'assistant',
-          subtype: 'tool_use',
-          tool: { name: 'Edit', input: { file_path: 'src/index.ts' } },
+          message: {
+            model: 'claude-opus-4-6',
+            id: 'msg_test',
+            type: 'message',
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'toolu_1', name: 'Edit', input: { file_path: 'src/index.ts' } },
+            ],
+          },
         }),
       );
 
@@ -184,8 +189,13 @@ describe('統合テスト: コンポーネント配線', () => {
         proc,
         JSON.stringify({
           type: 'assistant',
-          subtype: 'thinking',
-          content: [{ type: 'thinking', thinking: 'コードを分析中...' }],
+          message: {
+            model: 'claude-opus-4-6',
+            id: 'msg_test',
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'thinking', thinking: 'コードを分析中...', signature: 'sig' }],
+          },
         }),
       );
 

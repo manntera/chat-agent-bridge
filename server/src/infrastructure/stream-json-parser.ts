@@ -40,23 +40,25 @@ export function parseStreamJsonLine(line: string): ParsedEvent {
     return { kind: 'result', text: typeof parsed.result === 'string' ? parsed.result : '' };
   }
 
-  if (parsed.type === 'assistant' && parsed.subtype === 'tool_use') {
-    const tool = parsed.tool as Record<string, unknown> | undefined;
-    if (tool && typeof tool.name === 'string') {
-      const input = (tool.input as Record<string, unknown>) ?? {};
+  if (parsed.type === 'assistant') {
+    const message = parsed.message as Record<string, unknown> | undefined;
+    const content = (message?.content as Array<Record<string, unknown>>) ?? [];
+    if (content.length === 0) return IGNORED;
+
+    const first = content[0];
+
+    if (first.type === 'tool_use' && typeof first.name === 'string') {
+      const input = (first.input as Record<string, unknown>) ?? {};
       return {
         kind: 'progress',
-        event: { kind: 'tool_use', toolName: tool.name, target: extractTarget(tool.name, input) },
+        event: { kind: 'tool_use', toolName: first.name, target: extractTarget(first.name, input) },
       };
     }
-  }
 
-  if (parsed.type === 'assistant' && parsed.subtype === 'thinking') {
-    const content = parsed.content as Array<Record<string, unknown>> | undefined;
-    if (content && content.length > 0 && typeof content[0].thinking === 'string') {
+    if (first.type === 'thinking' && typeof first.thinking === 'string') {
       return {
         kind: 'progress',
-        event: { kind: 'thinking', text: content[0].thinking },
+        event: { kind: 'thinking', text: first.thinking },
       };
     }
   }

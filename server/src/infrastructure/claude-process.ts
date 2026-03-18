@@ -19,19 +19,22 @@ export class ClaudeProcess implements IClaudeProcess {
     return this.process !== null;
   }
 
-  spawn(prompt: string, sessionId: string, workDir: string): void {
+  spawn(prompt: string, sessionId: string, workDir: string, resume: boolean): void {
     if (this.process !== null) return;
 
     let resultText = '';
     let buffer = '';
+
+    const sessionArgs = resume
+      ? ['--resume', sessionId]
+      : ['--session-id', sessionId];
 
     const proc = this.spawnFn(
       this.claudePath,
       [
         '-p',
         prompt,
-        '--session-id',
-        sessionId,
+        ...sessionArgs,
         '--output-format',
         'stream-json',
         '--verbose',
@@ -41,6 +44,11 @@ export class ClaudeProcess implements IClaudeProcess {
     );
 
     this.process = proc;
+
+    let stderrOutput = '';
+    proc.stderr?.on('data', (chunk: Buffer) => {
+      stderrOutput += chunk.toString();
+    });
 
     proc.stdout?.on('data', (chunk: Buffer) => {
       buffer += chunk.toString();
@@ -63,7 +71,8 @@ export class ClaudeProcess implements IClaudeProcess {
         clearTimeout(this.killTimer);
         this.killTimer = null;
       }
-      this.onProcessEnd(exitCode ?? 1, resultText);
+      const output = resultText || stderrOutput;
+      this.onProcessEnd(exitCode ?? 1, output);
     });
 
     proc.on('error', (err) => {

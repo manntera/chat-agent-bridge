@@ -73,10 +73,10 @@ describe('ClaudeProcess', () => {
   // ----- spawn -----
 
   describe('spawn', () => {
-    it('claude CLI を正しい引数で起動する', () => {
+    it('新規セッションで --session-id を使って起動する', () => {
       const ctx = createTestContext();
 
-      ctx.claudeProcess.spawn('hello', 'session-123', '/home/user/project');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/home/user/project', false);
 
       expect(ctx.mockSpawnFn).toHaveBeenCalledOnce();
       const [cmd, args, opts] = ctx.mockSpawnFn.mock.calls[0];
@@ -85,6 +85,7 @@ describe('ClaudeProcess', () => {
       expect(args).toContain('hello');
       expect(args).toContain('--session-id');
       expect(args).toContain('session-123');
+      expect(args).not.toContain('--resume');
       expect(args).toContain('--output-format');
       expect(args).toContain('stream-json');
       expect(args).toContain('--verbose');
@@ -93,11 +94,22 @@ describe('ClaudeProcess', () => {
       expect(opts.stdio).toEqual(['ignore', 'pipe', 'pipe']);
     });
 
+    it('既存セッション継続時は --resume を使って起動する', () => {
+      const ctx = createTestContext();
+
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', true);
+
+      const args = ctx.mockSpawnFn.mock.calls[0][1];
+      expect(args).toContain('--resume');
+      expect(args).toContain('session-123');
+      expect(args).not.toContain('--session-id');
+    });
+
     it('spawn 後 isRunning が true になる', () => {
       const ctx = createTestContext();
       expect(ctx.claudeProcess.isRunning).toBe(false);
 
-      ctx.claudeProcess.spawn('hello', 'session-123', '/work');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
 
       expect(ctx.claudeProcess.isRunning).toBe(true);
     });
@@ -105,8 +117,8 @@ describe('ClaudeProcess', () => {
     it('既にプロセス実行中の場合、二重起動しない', () => {
       const ctx = createTestContext();
 
-      ctx.claudeProcess.spawn('first', 'session-1', '/work');
-      ctx.claudeProcess.spawn('second', 'session-2', '/work');
+      ctx.claudeProcess.spawn('first', 'session-1', '/work', false);
+      ctx.claudeProcess.spawn('second', 'session-2', '/work', false);
 
       expect(ctx.mockSpawnFn).toHaveBeenCalledOnce();
     });
@@ -117,15 +129,22 @@ describe('ClaudeProcess', () => {
   describe('stdout パース', () => {
     it('ツール使用イベントを onProgress に通知する', () => {
       const ctx = createTestContext();
-      ctx.claudeProcess.spawn('hello', 'session-123', '/work');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
       const proc = latestProcess(ctx);
 
       sendStdout(
         proc,
         JSON.stringify({
           type: 'assistant',
-          subtype: 'tool_use',
-          tool: { name: 'Edit', input: { file_path: 'src/index.ts' } },
+          message: {
+            model: 'claude-opus-4-6',
+            id: 'msg_test',
+            type: 'message',
+            role: 'assistant',
+            content: [
+              { type: 'tool_use', id: 'toolu_1', name: 'Edit', input: { file_path: 'src/index.ts' } },
+            ],
+          },
         }),
       );
 
@@ -139,15 +158,20 @@ describe('ClaudeProcess', () => {
 
     it('拡張思考イベントを onProgress に通知する', () => {
       const ctx = createTestContext();
-      ctx.claudeProcess.spawn('hello', 'session-123', '/work');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
       const proc = latestProcess(ctx);
 
       sendStdout(
         proc,
         JSON.stringify({
           type: 'assistant',
-          subtype: 'thinking',
-          content: [{ type: 'thinking', thinking: '分析中...' }],
+          message: {
+            model: 'claude-opus-4-6',
+            id: 'msg_test',
+            type: 'message',
+            role: 'assistant',
+            content: [{ type: 'thinking', thinking: '分析中...', signature: 'sig' }],
+          },
         }),
       );
 
@@ -157,7 +181,7 @@ describe('ClaudeProcess', () => {
 
     it('result イベントのテキストをプロセス終了時に渡す', () => {
       const ctx = createTestContext();
-      ctx.claudeProcess.spawn('hello', 'session-123', '/work');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
       const proc = latestProcess(ctx);
 
       sendStdout(proc, JSON.stringify({ type: 'result', result: '回答テキスト' }));
@@ -169,7 +193,7 @@ describe('ClaudeProcess', () => {
 
     it('system イベントは無視される', () => {
       const ctx = createTestContext();
-      ctx.claudeProcess.spawn('hello', 'session-123', '/work');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
       const proc = latestProcess(ctx);
 
       sendStdout(proc, JSON.stringify({ type: 'system', subtype: 'init', session_id: 'abc' }));
@@ -179,13 +203,20 @@ describe('ClaudeProcess', () => {
 
     it('不完全な行はバッファリングされ、次のチャンクと結合される', () => {
       const ctx = createTestContext();
-      ctx.claudeProcess.spawn('hello', 'session-123', '/work');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
       const proc = latestProcess(ctx);
 
       const fullLine = JSON.stringify({
         type: 'assistant',
-        subtype: 'tool_use',
-        tool: { name: 'Read', input: { file_path: 'file.ts' } },
+        message: {
+          model: 'claude-opus-4-6',
+          id: 'msg_test',
+          type: 'message',
+          role: 'assistant',
+          content: [
+            { type: 'tool_use', id: 'toolu_1', name: 'Read', input: { file_path: 'file.ts' } },
+          ],
+        },
       });
 
       // 行を途中で分割して送信
@@ -208,7 +239,7 @@ describe('ClaudeProcess', () => {
   describe('プロセス終了', () => {
     it('正常終了(exitCode=0) → onProcessEnd に結果を通知', () => {
       const ctx = createTestContext();
-      ctx.claudeProcess.spawn('hello', 'session-123', '/work');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
       const proc = latestProcess(ctx);
 
       sendStdout(proc, JSON.stringify({ type: 'result', result: 'done' }));
@@ -221,7 +252,7 @@ describe('ClaudeProcess', () => {
 
     it('異常終了(exitCode≠0) → onProcessEnd にエラーを通知', () => {
       const ctx = createTestContext();
-      ctx.claudeProcess.spawn('hello', 'session-123', '/work');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
       const proc = latestProcess(ctx);
 
       simulateClose(proc, 1);
@@ -233,7 +264,7 @@ describe('ClaudeProcess', () => {
 
     it('result イベントがない場合は空文字列を出力として渡す', () => {
       const ctx = createTestContext();
-      ctx.claudeProcess.spawn('hello', 'session-123', '/work');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
       const proc = latestProcess(ctx);
 
       simulateClose(proc, 0);
@@ -244,11 +275,11 @@ describe('ClaudeProcess', () => {
     it('プロセス終了後に再度 spawn できる', () => {
       const ctx = createTestContext();
 
-      ctx.claudeProcess.spawn('first', 'session-1', '/work');
+      ctx.claudeProcess.spawn('first', 'session-1', '/work', false);
       simulateClose(latestProcess(ctx), 0);
       expect(ctx.claudeProcess.isRunning).toBe(false);
 
-      ctx.claudeProcess.spawn('second', 'session-2', '/work');
+      ctx.claudeProcess.spawn('second', 'session-2', '/work', false);
       expect(ctx.claudeProcess.isRunning).toBe(true);
       expect(ctx.mockSpawnFn).toHaveBeenCalledTimes(2);
     });
@@ -259,7 +290,7 @@ describe('ClaudeProcess', () => {
   describe('error イベント（起動失敗）', () => {
     it('spawn 起動失敗 → onProcessEnd にエラーを通知', () => {
       const ctx = createTestContext();
-      ctx.claudeProcess.spawn('hello', 'session-123', '/work');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
       const proc = latestProcess(ctx);
 
       proc.emit('error', new Error('spawn ENOENT'));
@@ -276,7 +307,7 @@ describe('ClaudeProcess', () => {
   describe('interrupt', () => {
     it('SIGINT を送信する', () => {
       const ctx = createTestContext();
-      ctx.claudeProcess.spawn('hello', 'session-123', '/work');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
       const proc = latestProcess(ctx);
       const killSpy = vi.spyOn(proc, 'kill');
 
@@ -294,7 +325,7 @@ describe('ClaudeProcess', () => {
 
     it('10秒以内にプロセスが終了すれば SIGKILL は送信されない', () => {
       const ctx = createTestContext();
-      ctx.claudeProcess.spawn('hello', 'session-123', '/work');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
       const proc = latestProcess(ctx);
       const killSpy = vi.spyOn(proc, 'kill');
 
@@ -310,7 +341,7 @@ describe('ClaudeProcess', () => {
 
     it('10秒経過してもプロセスが終了しない場合、SIGKILL を送信する', () => {
       const ctx = createTestContext();
-      ctx.claudeProcess.spawn('hello', 'session-123', '/work');
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
       const proc = latestProcess(ctx);
       const killSpy = vi.spyOn(proc, 'kill');
 

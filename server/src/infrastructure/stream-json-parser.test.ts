@@ -1,16 +1,28 @@
 import { describe, it, expect } from 'vitest';
 import { parseStreamJsonLine } from './stream-json-parser.js';
 
+/** 実際の Claude CLI stream-json フォーマットに合わせたヘルパー */
+function assistantEvent(content: unknown[]) {
+  return JSON.stringify({
+    type: 'assistant',
+    message: {
+      model: 'claude-opus-4-6',
+      id: 'msg_test',
+      type: 'message',
+      role: 'assistant',
+      content,
+    },
+  });
+}
+
 describe('parseStreamJsonLine', () => {
   // ----- ツール使用イベント -----
 
   describe('ツール使用イベント', () => {
     it('Edit ツール → file_path を target として抽出', () => {
-      const line = JSON.stringify({
-        type: 'assistant',
-        subtype: 'tool_use',
-        tool: { name: 'Edit', input: { file_path: 'src/index.ts' } },
-      });
+      const line = assistantEvent([
+        { type: 'tool_use', id: 'toolu_1', name: 'Edit', input: { file_path: 'src/index.ts' } },
+      ]);
 
       expect(parseStreamJsonLine(line)).toEqual({
         kind: 'progress',
@@ -19,11 +31,9 @@ describe('parseStreamJsonLine', () => {
     });
 
     it('Read ツール → file_path を target として抽出', () => {
-      const line = JSON.stringify({
-        type: 'assistant',
-        subtype: 'tool_use',
-        tool: { name: 'Read', input: { file_path: 'src/utils.ts' } },
-      });
+      const line = assistantEvent([
+        { type: 'tool_use', id: 'toolu_1', name: 'Read', input: { file_path: 'src/utils.ts' } },
+      ]);
 
       expect(parseStreamJsonLine(line)).toEqual({
         kind: 'progress',
@@ -32,11 +42,14 @@ describe('parseStreamJsonLine', () => {
     });
 
     it('Write ツール → file_path を target として抽出', () => {
-      const line = JSON.stringify({
-        type: 'assistant',
-        subtype: 'tool_use',
-        tool: { name: 'Write', input: { file_path: 'src/new-file.ts' } },
-      });
+      const line = assistantEvent([
+        {
+          type: 'tool_use',
+          id: 'toolu_1',
+          name: 'Write',
+          input: { file_path: 'src/new-file.ts' },
+        },
+      ]);
 
       expect(parseStreamJsonLine(line)).toEqual({
         kind: 'progress',
@@ -45,11 +58,9 @@ describe('parseStreamJsonLine', () => {
     });
 
     it('Bash ツール → command を target として抽出', () => {
-      const line = JSON.stringify({
-        type: 'assistant',
-        subtype: 'tool_use',
-        tool: { name: 'Bash', input: { command: 'npm test' } },
-      });
+      const line = assistantEvent([
+        { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'npm test' } },
+      ]);
 
       expect(parseStreamJsonLine(line)).toEqual({
         kind: 'progress',
@@ -59,11 +70,9 @@ describe('parseStreamJsonLine', () => {
 
     it('Bash ツール → 100文字を超える command は切り詰め', () => {
       const longCommand = 'a'.repeat(150);
-      const line = JSON.stringify({
-        type: 'assistant',
-        subtype: 'tool_use',
-        tool: { name: 'Bash', input: { command: longCommand } },
-      });
+      const line = assistantEvent([
+        { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: longCommand } },
+      ]);
 
       const result = parseStreamJsonLine(line);
       expect(result.kind).toBe('progress');
@@ -77,11 +86,9 @@ describe('parseStreamJsonLine', () => {
     });
 
     it('Glob ツール → pattern を target として抽出', () => {
-      const line = JSON.stringify({
-        type: 'assistant',
-        subtype: 'tool_use',
-        tool: { name: 'Glob', input: { pattern: '**/*.ts' } },
-      });
+      const line = assistantEvent([
+        { type: 'tool_use', id: 'toolu_1', name: 'Glob', input: { pattern: '**/*.ts' } },
+      ]);
 
       expect(parseStreamJsonLine(line)).toEqual({
         kind: 'progress',
@@ -90,11 +97,9 @@ describe('parseStreamJsonLine', () => {
     });
 
     it('Grep ツール → pattern を target として抽出', () => {
-      const line = JSON.stringify({
-        type: 'assistant',
-        subtype: 'tool_use',
-        tool: { name: 'Grep', input: { pattern: 'TODO' } },
-      });
+      const line = assistantEvent([
+        { type: 'tool_use', id: 'toolu_1', name: 'Grep', input: { pattern: 'TODO' } },
+      ]);
 
       expect(parseStreamJsonLine(line)).toEqual({
         kind: 'progress',
@@ -103,11 +108,9 @@ describe('parseStreamJsonLine', () => {
     });
 
     it('未知のツール → ツール名をそのまま target にする', () => {
-      const line = JSON.stringify({
-        type: 'assistant',
-        subtype: 'tool_use',
-        tool: { name: 'Agent', input: { some_field: 'value' } },
-      });
+      const line = assistantEvent([
+        { type: 'tool_use', id: 'toolu_1', name: 'Agent', input: { some_field: 'value' } },
+      ]);
 
       expect(parseStreamJsonLine(line)).toEqual({
         kind: 'progress',
@@ -120,11 +123,9 @@ describe('parseStreamJsonLine', () => {
 
   describe('拡張思考イベント', () => {
     it('thinking イベント → 思考テキストを抽出', () => {
-      const line = JSON.stringify({
-        type: 'assistant',
-        subtype: 'thinking',
-        content: [{ type: 'thinking', thinking: '分析中...' }],
-      });
+      const line = assistantEvent([
+        { type: 'thinking', thinking: '分析中...', signature: 'sig_test' },
+      ]);
 
       expect(parseStreamJsonLine(line)).toEqual({
         kind: 'progress',
@@ -132,12 +133,8 @@ describe('parseStreamJsonLine', () => {
       });
     });
 
-    it('content 配列が空 → ignored', () => {
-      const line = JSON.stringify({
-        type: 'assistant',
-        subtype: 'thinking',
-        content: [],
-      });
+    it('message.content が空 → ignored', () => {
+      const line = assistantEvent([]);
 
       expect(parseStreamJsonLine(line)).toEqual({ kind: 'ignored' });
     });
@@ -200,12 +197,8 @@ describe('parseStreamJsonLine', () => {
       expect(parseStreamJsonLine(line)).toEqual({ kind: 'ignored' });
     });
 
-    it('assistant だが未知の subtype → ignored', () => {
-      const line = JSON.stringify({
-        type: 'assistant',
-        subtype: 'unknown_subtype',
-        content: [],
-      });
+    it('assistant だが text 型 → ignored', () => {
+      const line = assistantEvent([{ type: 'text', text: 'hello' }]);
 
       expect(parseStreamJsonLine(line)).toEqual({ kind: 'ignored' });
     });

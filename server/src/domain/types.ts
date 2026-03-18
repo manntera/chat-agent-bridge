@@ -14,6 +14,6 @@ export type NotifyFn = (notification: Notification) => void;
 
 export interface IClaudeProcess {
   readonly isRunning: boolean;
-  spawn(prompt: string, sessionId: string, workDir: string): void;
+  spawn(prompt: string, sessionId: string, workDir: string, resume: boolean): void;
   interrupt(): void;
 }
