@@ -105,6 +105,36 @@ describe('ClaudeProcess', () => {
       expect(args).not.toContain('--session-id');
     });
 
+    it('model オプション指定時に --model 引数が含まれる', () => {
+      const ctx = createTestContext();
+
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false, { model: 'sonnet' });
+
+      const args = ctx.mockSpawnFn.mock.calls[0][1];
+      expect(args).toContain('--model');
+      expect(args).toContain('sonnet');
+    });
+
+    it('effort オプション指定時に --effort 引数が含まれる', () => {
+      const ctx = createTestContext();
+
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false, { effort: 'max' });
+
+      const args = ctx.mockSpawnFn.mock.calls[0][1];
+      expect(args).toContain('--effort');
+      expect(args).toContain('max');
+    });
+
+    it('オプション未指定時に --model / --effort が含まれない', () => {
+      const ctx = createTestContext();
+
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
+
+      const args = ctx.mockSpawnFn.mock.calls[0][1];
+      expect(args).not.toContain('--model');
+      expect(args).not.toContain('--effort');
+    });
+
     it('spawn 後 isRunning が true になる', () => {
       const ctx = createTestContext();
       expect(ctx.claudeProcess.isRunning).toBe(false);

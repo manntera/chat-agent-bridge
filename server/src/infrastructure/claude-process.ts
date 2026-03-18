@@ -1,5 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process';
-import type { IClaudeProcess, ProgressEvent } from '../domain/types.js';
+import type { IClaudeProcess, ProgressEvent, SessionOptions } from '../domain/types.js';
 import { parseStreamJsonLine } from './stream-json-parser.js';
 
 export type SpawnFn = (command: string, args: string[], options: SpawnOptions) => ChildProcess;
@@ -19,7 +19,7 @@ export class ClaudeProcess implements IClaudeProcess {
     return this.process !== null;
   }
 
-  spawn(prompt: string, sessionId: string, workDir: string, resume: boolean): void {
+  spawn(prompt: string, sessionId: string, workDir: string, resume: boolean, options: SessionOptions = {}): void {
     if (this.process !== null) return;
 
     let resultText = '';
@@ -29,12 +29,17 @@ export class ClaudeProcess implements IClaudeProcess {
       ? ['--resume', sessionId]
       : ['--session-id', sessionId];
 
+    const optionArgs: string[] = [];
+    if (options.model) optionArgs.push('--model', options.model);
+    if (options.effort) optionArgs.push('--effort', options.effort);
+
     const proc = this.spawnFn(
       this.claudePath,
       [
         '-p',
         prompt,
         ...sessionArgs,
+        ...optionArgs,
         '--output-format',
         'stream-json',
         '--verbose',

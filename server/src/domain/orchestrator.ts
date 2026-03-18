@@ -1,9 +1,10 @@
 import { parseCommand } from './command.js';
 import type { Session } from './session.js';
-import type { IClaudeProcess, NotifyFn, OrchestratorState, ProgressEvent } from './types.js';
+import type { IClaudeProcess, NotifyFn, OrchestratorState, ProgressEvent, SessionOptions } from './types.js';
 
 export class Orchestrator {
   private interruptReason: 'new' | 'interrupt' | null = null;
+  private pendingNewOptions: SessionOptions = {};
 
   constructor(
     private readonly session: Session,
@@ -32,16 +33,17 @@ export class Orchestrator {
           const sessionId = this.session.sessionId!;
           const resume = !this.session.isNew;
           this.session.markUsed();
-          this.claudeProcess.spawn(command.text, sessionId, this.session.workDir, resume);
+          this.claudeProcess.spawn(command.text, sessionId, this.session.workDir, resume, this.session.options);
         }
         break;
 
       case 'new':
         if (state === 'initial' || state === 'idle') {
           this.session.reset();
-          this.session.ensure();
-          this.notify({ type: 'info', message: '新しいセッションを開始しました' });
+          this.session.ensure(command.options);
+          this.notify({ type: 'info', message: this.formatNewSessionMessage() });
         } else if (state === 'busy') {
+          this.pendingNewOptions = command.options;
           this.interruptReason = 'new';
           this.claudeProcess.interrupt();
         }
@@ -54,6 +56,16 @@ export class Orchestrator {
         }
         break;
     }
+  }
+
+  private formatNewSessionMessage(): string {
+    const opts = this.session.options;
+    const parts: string[] = ['新しいセッションを開始しました'];
+    const details: string[] = [];
+    if (opts.model) details.push(`model: ${opts.model}`);
+    if (opts.effort) details.push(`effort: ${opts.effort}`);
+    if (details.length > 0) parts.push(`(${details.join(', ')})`);
+    return parts.join(' ');
   }
 
   onProgress(event: ProgressEvent): void {
@@ -71,8 +83,9 @@ export class Orchestrator {
       this.notify({ type: 'info', message: '中断しました' });
     } else {
       this.session.reset();
-      this.session.ensure();
-      this.notify({ type: 'info', message: '新しいセッションを開始しました' });
+      this.session.ensure(this.pendingNewOptions);
+      this.pendingNewOptions = {};
+      this.notify({ type: 'info', message: this.formatNewSessionMessage() });
     }
     this.interruptReason = null;
   }

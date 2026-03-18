@@ -80,6 +80,41 @@ describe('Session', () => {
     });
   });
 
+  describe('options', () => {
+    it('初期状態: options は空オブジェクト', () => {
+      const session = new Session(WORK_DIR);
+      expect(session.options).toEqual({});
+    });
+
+    it('ensure() にオプションを渡すと保存される', () => {
+      const session = new Session(WORK_DIR);
+      session.ensure({ model: 'sonnet', effort: 'max' });
+      expect(session.options).toEqual({ model: 'sonnet', effort: 'max' });
+    });
+
+    it('既にセッションがある場合、ensure() でオプションは上書きされない', () => {
+      const session = new Session(WORK_DIR);
+      session.ensure({ model: 'sonnet' });
+      session.ensure({ model: 'opus' });
+      expect(session.options).toEqual({ model: 'sonnet' });
+    });
+
+    it('reset() でオプションがクリアされる', () => {
+      const session = new Session(WORK_DIR);
+      session.ensure({ model: 'sonnet', effort: 'max' });
+      session.reset();
+      expect(session.options).toEqual({});
+    });
+
+    it('reset 後の ensure() で新しいオプションを設定できる', () => {
+      const session = new Session(WORK_DIR);
+      session.ensure({ model: 'sonnet' });
+      session.reset();
+      session.ensure({ model: 'opus', effort: 'high' });
+      expect(session.options).toEqual({ model: 'opus', effort: 'high' });
+    });
+  });
+
   describe('reset()', () => {
     it('sessionId を null に戻す', () => {
       const session = new Session(WORK_DIR);

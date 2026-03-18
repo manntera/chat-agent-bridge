@@ -1,18 +1,19 @@
 import { describe, it, expect } from 'vitest';
 import { Orchestrator } from './orchestrator.js';
 import { Session } from './session.js';
-import type { IClaudeProcess, Notification, ProgressEvent } from './types.js';
+import type { IClaudeProcess, Notification, ProgressEvent, SessionOptions } from './types.js';
 
 // --- テスト用モック ---
 
 class MockClaudeProcess implements IClaudeProcess {
   isRunning = false;
-  spawnCalls: Array<{ prompt: string; sessionId: string; workDir: string; resume: boolean }> = [];
+  spawnCalls: Array<{ prompt: string; sessionId: string; workDir: string; resume: boolean; options?: SessionOptions }> =
+    [];
   interruptCalls = 0;
 
-  spawn(prompt: string, sessionId: string, workDir: string, resume: boolean): void {
+  spawn(prompt: string, sessionId: string, workDir: string, resume: boolean, options?: SessionOptions): void {
     this.isRunning = true;
-    this.spawnCalls.push({ prompt, sessionId, workDir, resume });
+    this.spawnCalls.push({ prompt, sessionId, workDir, resume, options });
   }
 
   interrupt(): void {
@@ -154,6 +155,7 @@ describe('Orchestrator', () => {
         sessionId,
         workDir: WORK_DIR,
         resume: false,
+        options: {},
       });
       expect(ctx.orchestrator.state).toBe('busy');
     });
@@ -171,6 +173,7 @@ describe('Orchestrator', () => {
         sessionId,
         workDir: WORK_DIR,
         resume: true,
+        options: {},
       });
       expect(ctx.orchestrator.state).toBe('busy');
     });
@@ -408,6 +411,69 @@ describe('Orchestrator', () => {
       ctx.orchestrator.onProgress({ kind: 'thinking', text: 'thinking...' });
 
       expect(ctx.orchestrator.state).toBe('busy');
+    });
+  });
+
+  // ----- セッションオプション -----
+
+  describe('セッションオプション', () => {
+    it('!new にオプションを指定すると通知メッセージに含まれる', () => {
+      const { orchestrator, notifications } = createOrchestrator();
+
+      orchestrator.handleMessage('!new --model sonnet --effort max');
+
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0]).toEqual({
+        type: 'info',
+        message: '新しいセッションを開始しました (model: sonnet, effort: max)',
+      });
+    });
+
+    it('!new のオプションが Session に保存される', () => {
+      const { orchestrator, session } = createOrchestrator();
+
+      orchestrator.handleMessage('!new --model opus --effort high');
+
+      expect(session.options).toEqual({ model: 'opus', effort: 'high' });
+    });
+
+    it('オプションが spawn に渡される', () => {
+      const ctx = createOrchestrator();
+
+      ctx.orchestrator.handleMessage('!new --model sonnet max');
+      ctx.orchestrator.handleMessage('hello');
+
+      expect(ctx.mockProcess.spawnCalls[0].options).toEqual({ model: 'sonnet', effort: 'max' });
+    });
+
+    it('オプションなしの !new では空オプション', () => {
+      const { orchestrator, session } = createOrchestrator();
+
+      orchestrator.handleMessage('!new');
+
+      expect(session.options).toEqual({});
+    });
+
+    it('Busy 中の !new オプションが中断後の新セッションに引き継がれる', () => {
+      const ctx = createOrchestrator();
+
+      ctx.orchestrator.handleMessage('!new');
+      ctx.orchestrator.handleMessage('task');
+      ctx.notifications.length = 0;
+
+      // Busy 中に !new --model sonnet
+      ctx.orchestrator.handleMessage('!new --model sonnet max');
+      expect(ctx.orchestrator.state).toBe('interrupting');
+
+      // プロセス終了 → 新セッション
+      ctx.mockProcess.simulateEnd();
+      ctx.orchestrator.onProcessEnd(0, '');
+
+      expect(ctx.session.options).toEqual({ model: 'sonnet', effort: 'max' });
+      expect(ctx.notifications[0]).toEqual({
+        type: 'info',
+        message: '新しいセッションを開始しました (model: sonnet, effort: max)',
+      });
     });
   });
 
