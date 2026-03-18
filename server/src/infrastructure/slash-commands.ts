@@ -8,7 +8,15 @@ export const ccCommand = new SlashCommandBuilder()
       .setName('new')
       .setDescription('新しいセッションを開始します')
       .addStringOption((opt) =>
-        opt.setName('model').setDescription('使用するモデル').setRequired(false),
+        opt
+          .setName('model')
+          .setDescription('使用するモデル')
+          .setRequired(false)
+          .addChoices(
+            { name: 'sonnet', value: 'sonnet' },
+            { name: 'opus', value: 'opus' },
+            { name: 'haiku', value: 'haiku' },
+          ),
       )
       .addStringOption((opt) =>
         opt
