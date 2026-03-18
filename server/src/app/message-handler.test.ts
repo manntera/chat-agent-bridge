@@ -9,12 +9,12 @@ import { createMessageHandler } from './message-handler.js';
 
 class MockClaudeProcess implements IClaudeProcess {
   isRunning = false;
-  spawnCalls: Array<{ prompt: string; sessionId: string; workDir: string }> = [];
+  spawnCalls: Array<{ prompt: string; sessionId: string; workDir: string; resume: boolean }> = [];
   interruptCalls = 0;
 
-  spawn(prompt: string, sessionId: string, workDir: string): void {
+  spawn(prompt: string, sessionId: string, workDir: string, resume: boolean): void {
     this.isRunning = true;
-    this.spawnCalls.push({ prompt, sessionId, workDir });
+    this.spawnCalls.push({ prompt, sessionId, workDir, resume });
   }
 
   interrupt(): void {
@@ -112,6 +112,7 @@ describe('createMessageHandler', () => {
     it('許可されたメッセージは Orchestrator.handleMessage に渡される', () => {
       const { handler, mockProcess } = createTestContext();
 
+      handler(validMessage('!new'));
       handler(validMessage('hello'));
 
       expect(mockProcess.spawnCalls).toHaveLength(1);
@@ -121,11 +122,10 @@ describe('createMessageHandler', () => {
     it('コマンドメッセージも正しく Orchestrator に委譲される', () => {
       const { handler, mockProcess } = createTestContext();
 
-      // Busy 状態にする
+      handler(validMessage('!new'));
       handler(validMessage('some task'));
       expect(mockProcess.spawnCalls).toHaveLength(1);
 
-      // !interrupt を送信
       handler(validMessage('!interrupt'));
 
       expect(mockProcess.interruptCalls).toBe(1);
@@ -133,6 +133,8 @@ describe('createMessageHandler', () => {
 
     it('複数メッセージが順番に処理される', () => {
       const { handler, orchestrator, mockProcess } = createTestContext();
+
+      handler(validMessage('!new'));
 
       // 1つ目のメッセージ → Busy
       handler(validMessage('first task'));

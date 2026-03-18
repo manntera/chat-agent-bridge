@@ -127,6 +127,7 @@ describe('統合テスト: コンポーネント配線', () => {
     it('許可されたメッセージが ClaudeCode に送信され、結果が通知される', () => {
       const ctx = createIntegrationContext();
 
+      ctx.handleMessage(validMessage('!new'));
       ctx.handleMessage(validMessage('テストを書いて'));
 
       // ClaudeProcess が起動されている
@@ -145,6 +146,8 @@ describe('統合テスト: コンポーネント配線', () => {
 
     it('連続したメッセージが同一セッションで処理される', () => {
       const ctx = createIntegrationContext();
+
+      ctx.handleMessage(validMessage('!new'));
 
       // 1つ目のメッセージ
       ctx.handleMessage(validMessage('最初のタスク'));
@@ -177,6 +180,7 @@ describe('統合テスト: コンポーネント配線', () => {
     it('ツール使用イベントがスレッドに通知される', async () => {
       const ctx = createIntegrationContext();
 
+      ctx.handleMessage(validMessage('!new'));
       ctx.handleMessage(validMessage('ファイルを編集して'));
       const proc = latestProcess(ctx);
 
@@ -204,6 +208,7 @@ describe('統合テスト: コンポーネント配線', () => {
     it('拡張思考イベントがスレッドに通知される', async () => {
       const ctx = createIntegrationContext();
 
+      ctx.handleMessage(validMessage('!new'));
       ctx.handleMessage(validMessage('分析して'));
       const proc = latestProcess(ctx);
 
@@ -261,6 +266,7 @@ describe('統合テスト: コンポーネント配線', () => {
     it('処理中に入力すると「処理中です」と通知される', () => {
       const ctx = createIntegrationContext();
 
+      ctx.handleMessage(validMessage('!new'));
       ctx.handleMessage(validMessage('長い処理'));
       ctx.handleMessage(validMessage('もう一つ'));
 
@@ -270,6 +276,7 @@ describe('統合テスト: コンポーネント配線', () => {
     it('!interrupt でプロセスが中断される', () => {
       const ctx = createIntegrationContext();
 
+      ctx.handleMessage(validMessage('!new'));
       ctx.handleMessage(validMessage('長い処理'));
       const proc = latestProcess(ctx);
       const killSpy = vi.spyOn(proc, 'kill');
@@ -288,6 +295,7 @@ describe('統合テスト: コンポーネント配線', () => {
       const ctx = createIntegrationContext();
 
       // セッションを開始
+      ctx.handleMessage(validMessage('!new'));
       ctx.handleMessage(validMessage('最初のタスク'));
       const proc1 = latestProcess(ctx);
       sendStdout(proc1, JSON.stringify({ type: 'result', result: '結果' }));
@@ -321,6 +329,7 @@ describe('統合テスト: コンポーネント配線', () => {
     it('ClaudeCode が異常終了した場合、エラーが通知される', () => {
       const ctx = createIntegrationContext();
 
+      ctx.handleMessage(validMessage('!new'));
       ctx.handleMessage(validMessage('hello'));
       const proc = latestProcess(ctx);
 

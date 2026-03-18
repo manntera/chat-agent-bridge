@@ -24,20 +24,22 @@ export class Orchestrator {
 
     switch (command.type) {
       case 'prompt':
-        if (state === 'busy' || state === 'interrupting') {
+        if (state === 'initial') {
+          this.notify({ type: 'info', message: '`!new` でセッションを開始してください' });
+        } else if (state === 'busy' || state === 'interrupting') {
           this.notify({ type: 'info', message: '処理中です' });
         } else {
-          const resume = state === 'idle';
-          const sessionId = this.session.ensure();
+          const sessionId = this.session.sessionId!;
+          const resume = !this.session.isNew;
+          this.session.markUsed();
           this.claudeProcess.spawn(command.text, sessionId, this.session.workDir, resume);
         }
         break;
 
       case 'new':
-        if (state === 'initial') {
-          this.notify({ type: 'info', message: 'セッションがありません' });
-        } else if (state === 'idle') {
+        if (state === 'initial' || state === 'idle') {
           this.session.reset();
+          this.session.ensure();
           this.notify({ type: 'info', message: '新しいセッションを開始しました' });
         } else if (state === 'busy') {
           this.interruptReason = 'new';
@@ -69,6 +71,7 @@ export class Orchestrator {
       this.notify({ type: 'info', message: '中断しました' });
     } else {
       this.session.reset();
+      this.session.ensure();
       this.notify({ type: 'info', message: '新しいセッションを開始しました' });
     }
     this.interruptReason = null;

@@ -43,6 +43,43 @@ describe('Session', () => {
     });
   });
 
+  describe('isNew / markUsed()', () => {
+    it('初期状態: isNew は false', () => {
+      const session = new Session(WORK_DIR);
+      expect(session.isNew).toBe(false);
+    });
+
+    it('ensure() 後は isNew が true', () => {
+      const session = new Session(WORK_DIR);
+      session.ensure();
+      expect(session.isNew).toBe(true);
+    });
+
+    it('markUsed() 後は isNew が false', () => {
+      const session = new Session(WORK_DIR);
+      session.ensure();
+      session.markUsed();
+      expect(session.isNew).toBe(false);
+    });
+
+    it('2回目の ensure() では isNew は変わらない（既に存在するため）', () => {
+      const session = new Session(WORK_DIR);
+      session.ensure();
+      session.markUsed();
+      session.ensure();
+      expect(session.isNew).toBe(false);
+    });
+
+    it('reset 後に ensure() すると再び isNew が true', () => {
+      const session = new Session(WORK_DIR);
+      session.ensure();
+      session.markUsed();
+      session.reset();
+      session.ensure();
+      expect(session.isNew).toBe(true);
+    });
+  });
+
   describe('reset()', () => {
     it('sessionId を null に戻す', () => {
       const session = new Session(WORK_DIR);
@@ -57,6 +94,13 @@ describe('Session', () => {
       session.reset();
       const id2 = session.ensure();
       expect(id2).not.toBe(id1);
+    });
+
+    it('reset で isNew も false に戻る', () => {
+      const session = new Session(WORK_DIR);
+      session.ensure();
+      session.reset();
+      expect(session.isNew).toBe(false);
     });
   });
 });
