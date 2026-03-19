@@ -1,16 +1,18 @@
 import type { Notification, NotifyFn, UsageInfo } from '../domain/types.js';
 
+export interface EmbedData {
+  color: number;
+  description?: string;
+  title?: string;
+  footer?: { text: string };
+}
+
+export interface SendOptions {
+  embeds: EmbedData[];
+}
+
 export interface ThreadSender {
-  send(content: string): Promise<unknown>;
-  setArchived(archived: boolean): Promise<unknown>;
-}
-
-export interface Threadable {
-  startThread(options: { name: string }): Promise<ThreadSender>;
-}
-
-export interface ChannelSender {
-  send(content: string): Promise<unknown>;
+  send(content: string | SendOptions): Promise<unknown>;
 }
 
 function splitMessage(text: string, maxLength = 2000): string[] {
@@ -34,95 +36,102 @@ function formatProgress(notification: Notification & { type: 'progress' }): stri
   return `💭 ${notification.event.text}`;
 }
 
-function formatUsage(usage: UsageInfo): string {
+function formatUsageFooter(usage: UsageInfo): string | null {
   const parts: string[] = [];
   if (usage.fiveHour) parts.push(`5h ${usage.fiveHour.utilization}%`);
   if (usage.sevenDay) parts.push(`7d ${usage.sevenDay.utilization}%`);
   if (usage.sevenDaySonnet) parts.push(`Sonnet ${usage.sevenDaySonnet.utilization}%`);
-  return `📊 利用状況: ${parts.join(' | ') || '取得できませんでした'}`;
+  return parts.length > 0 ? `📊 ${parts.join(' | ')}` : null;
 }
 
-function formatNotification(notification: Notification): string[] {
-  switch (notification.type) {
-    case 'info':
-      return [notification.message];
-    case 'result':
-      return splitMessage(notification.text);
-    case 'error':
-      return [`エラー (exit ${notification.exitCode}): ${notification.message}`];
-    case 'progress':
-      return [formatProgress(notification)];
-    case 'usage':
-      return [formatUsage(notification.usage)];
+const COLOR_SUCCESS = 0x00c853;
+const COLOR_ERROR = 0xff1744;
+const EMBED_MAX_LENGTH = 4096;
+
+type PendingResult =
+  | { type: 'result'; text: string }
+  | { type: 'error'; message: string; exitCode: number };
+
+/**
+ * セッションスレッド用の Notifier を作成する。
+ *
+ * 通知の流れ:
+ * - progress / info → プレーンテキストとして即座に送信
+ * - result / error → バッファ（usage を待つ）
+ * - usage → バッファされた result/error と結合して Embed で送信
+ */
+export function createNotifier(thread: ThreadSender): NotifyFn {
+  let pendingResult: PendingResult | null = null;
+
+  function sendText(text: string): void {
+    thread.send(text).catch((err) => console.error('Discord send error:', err));
   }
-}
 
-export function createNotifier(
-  channel: ChannelSender,
-): NotifyFn & { setThreadOrigin(message: Threadable): void } {
-  let threadPromise: Promise<ThreadSender> | null = null;
-  let pendingOrigin: Threadable | null = null;
+  function sendEmbed(embed: EmbedData): void {
+    thread.send({ embeds: [embed] }).catch((err) => console.error('Discord send error:', err));
+  }
 
-  function ensureThread(): Promise<ThreadSender> {
-    if (threadPromise === null) {
-      const origin = pendingOrigin;
-      pendingOrigin = null;
-      if (origin === null) {
-        throw new Error('No thread origin set');
+  function flush(usage: UsageInfo): void {
+    const footer = formatUsageFooter(usage);
+    const result = pendingResult;
+    pendingResult = null;
+
+    if (result === null) {
+      if (footer) {
+        sendEmbed({ color: COLOR_SUCCESS, footer: { text: footer } });
       }
-      threadPromise = origin.startThread({ name: '途中経過' });
+      return;
     }
-    return threadPromise;
-  }
 
-  function sendToChannel(messages: string[]): void {
-    for (const msg of messages) {
-      channel.send(msg).catch((err) => console.error('Discord send error:', err));
-    }
-  }
-
-  async function sendToThread(messages: string[]): Promise<void> {
-    const thread = await ensureThread();
-    for (const msg of messages) {
-      await thread.send(msg).catch((err) => console.error('Discord thread send error:', err));
-    }
-  }
-
-  function archiveThread(): void {
-    if (threadPromise) {
-      threadPromise
-        .then((thread) => thread.setArchived(true))
-        .catch((err) => console.error('Discord thread archive error:', err));
-    }
-    threadPromise = null;
-    pendingOrigin = null;
-  }
-
-  const notify: NotifyFn & { setThreadOrigin(message: Threadable): void } = Object.assign(
-    (notification: Notification) => {
-      const messages = formatNotification(notification);
-
-      if (notification.type === 'progress') {
-        sendToThread(messages).catch((err) => console.error('Discord thread error:', err));
-      } else if (notification.type === 'usage') {
-        const hasData =
-          notification.usage.fiveHour !== null ||
-          notification.usage.sevenDay !== null ||
-          notification.usage.sevenDaySonnet !== null;
-        const send = hasData ? sendToThread(messages) : Promise.resolve();
-        send
-          .then(() => archiveThread())
-          .catch((err) => console.error('Discord thread error:', err));
+    if (result.type === 'result') {
+      if (result.text.length <= EMBED_MAX_LENGTH) {
+        const embed: EmbedData = {
+          color: COLOR_SUCCESS,
+          description: result.text,
+        };
+        if (footer) embed.footer = { text: footer };
+        sendEmbed(embed);
       } else {
-        sendToChannel(messages);
+        const chunks = splitMessage(result.text);
+        for (const chunk of chunks) {
+          sendText(chunk);
+        }
+        const embed: EmbedData = { color: COLOR_SUCCESS };
+        if (footer) embed.footer = { text: footer };
+        sendEmbed(embed);
       }
-    },
-    {
-      setThreadOrigin(message: Threadable): void {
-        pendingOrigin = message;
-      },
-    },
-  );
+    } else {
+      const embed: EmbedData = {
+        color: COLOR_ERROR,
+        title: `エラー (exit ${result.exitCode})`,
+        description: result.message,
+      };
+      if (footer) embed.footer = { text: footer };
+      sendEmbed(embed);
+    }
+  }
 
-  return notify;
+  return (notification: Notification) => {
+    switch (notification.type) {
+      case 'progress':
+        sendText(formatProgress(notification));
+        break;
+      case 'info':
+        sendText(notification.message);
+        break;
+      case 'result':
+        pendingResult = { type: 'result', text: notification.text };
+        break;
+      case 'error':
+        pendingResult = {
+          type: 'error',
+          message: notification.message,
+          exitCode: notification.exitCode,
+        };
+        break;
+      case 'usage':
+        flush(notification.usage);
+        break;
+    }
+  };
 }

@@ -4,9 +4,14 @@ import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { Session } from './domain/session.js';
 import { AccessControl } from './domain/access-control.js';
 import { Orchestrator } from './domain/orchestrator.js';
+import { SessionManager } from './domain/session-manager.js';
 import type { ProgressEvent } from './domain/types.js';
 import { ClaudeProcess } from './infrastructure/claude-process.js';
-import { createNotifier } from './infrastructure/discord-notifier.js';
+import {
+  createNotifier,
+  type SendOptions,
+  type ThreadSender,
+} from './infrastructure/discord-notifier.js';
 import { createMessageHandler, type DiscordMessage } from './app/message-handler.js';
 
 // --- モック用ヘルパー ---
@@ -25,6 +30,11 @@ class MockChildProcess extends EventEmitter {
   }
 }
 
+interface SentItem {
+  type: 'text' | 'embed';
+  content: string | SendOptions;
+}
+
 // --- 統合テスト用セットアップ ---
 
 const CONFIG = {
@@ -34,19 +44,14 @@ const CONFIG = {
   claudePath: '/usr/bin/claude',
 };
 
+const THREAD_ID = 'thread-1';
+
 function createIntegrationContext() {
-  const sentMessages: string[] = [];
-  const threadMessages: string[] = [];
-  const mockThread = {
-    send: vi.fn((content: string) => {
-      threadMessages.push(content);
-      return Promise.resolve();
-    }),
-    setArchived: vi.fn(() => Promise.resolve()),
-  };
-  const sender = {
-    send: vi.fn((content: string) => {
-      sentMessages.push(content);
+  const sent: SentItem[] = [];
+  const mockThread: ThreadSender = {
+    send: vi.fn((content: string | SendOptions) => {
+      const type = typeof content === 'string' ? 'text' : 'embed';
+      sent.push({ type, content });
       return Promise.resolve();
     }),
   };
@@ -60,14 +65,14 @@ function createIntegrationContext() {
   });
 
   // ドメインオブジェクト
-  const session = new Session(CONFIG.workDir);
   const accessControl = new AccessControl({
     allowedUserIds: CONFIG.allowedUserIds,
     channelId: CONFIG.channelId,
   });
+  const sessionManager = new SessionManager();
 
-  // インフラオブジェクト + 循環依存の解決
-  const discordNotifier = createNotifier(sender);
+  // セッションを作成してスレッドに紐づける
+  const session = new Session(CONFIG.workDir);
 
   let onProgress: (event: ProgressEvent) => void = () => {};
   let onProcessEnd: (exitCode: number, output: string) => void = () => {};
@@ -79,37 +84,41 @@ function createIntegrationContext() {
     mockSpawnFn,
   );
 
-  const orchestrator = new Orchestrator(session, claudeProcess, discordNotifier);
+  const notifier = createNotifier(mockThread);
+  const orchestrator = new Orchestrator(session, claudeProcess, notifier);
 
   onProgress = (event) => orchestrator.onProgress(event);
   onProcessEnd = (exitCode, output) => orchestrator.onProcessEnd(exitCode, output);
 
-  // App 層
-  const rawHandleMessage = createMessageHandler(accessControl, orchestrator);
+  session.ensure();
+  sessionManager.register(THREAD_ID, { orchestrator, session, claudeProcess, threadId: THREAD_ID });
 
-  // index.ts と同様、メッセージ処理前に setThreadOrigin を呼ぶ
+  // App 層
+  const rawHandleMessage = createMessageHandler(accessControl, sessionManager);
+
   const handleMessage = (msg: DiscordMessage) => {
-    if (!msg.authorBot && orchestrator.state === 'idle') {
-      discordNotifier.setThreadOrigin({
-        startThread: vi.fn(() => Promise.resolve(mockThread)),
-      });
-    }
     rawHandleMessage(msg);
   };
 
   return {
     handleMessage,
     orchestrator,
-    sender,
-    sentMessages,
-    threadMessages,
+    session,
+    sent,
     mockSpawnFn,
     spawnedProcesses,
+    sessionManager,
   };
 }
 
 function validMessage(content: string): DiscordMessage {
-  return { authorBot: false, authorId: 'user1', channelId: 'channel1', content };
+  return {
+    authorBot: false,
+    authorId: 'user1',
+    channelId: 'channel1',
+    threadId: THREAD_ID,
+    content,
+  };
 }
 
 function latestProcess(ctx: ReturnType<typeof createIntegrationContext>): MockChildProcess {
@@ -124,16 +133,23 @@ function simulateClose(proc: MockChildProcess, exitCode = 0) {
   proc.emit('close', exitCode);
 }
 
+function getTextMessages(sent: SentItem[]): string[] {
+  return sent.filter((s) => s.type === 'text').map((s) => s.content as string);
+}
+
+function getEmbeds(sent: SentItem[]): SendOptions[] {
+  return sent.filter((s) => s.type === 'embed').map((s) => s.content as SendOptions);
+}
+
 // =================================================================
 // テスト本体
 // =================================================================
 
 describe('統合テスト: コンポーネント配線', () => {
   describe('メッセージ → ClaudeCode → 結果通知', () => {
-    it('許可されたメッセージが ClaudeCode に送信され、結果が通知される', () => {
+    it('スレッド内のメッセージが ClaudeCode に送信され、結果が Embed で通知される', () => {
       const ctx = createIntegrationContext();
 
-      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.handleMessage(validMessage('テストを書いて'));
 
       // ClaudeProcess が起動されている
@@ -147,13 +163,15 @@ describe('統合テスト: コンポーネント配線', () => {
       sendStdout(proc, JSON.stringify({ type: 'result', result: '完了しました' }));
       simulateClose(proc, 0);
 
-      expect(ctx.sentMessages).toContain('完了しました');
+      // result は usage 到着後に Embed で送信される
+      const embeds = getEmbeds(ctx.sent);
+      expect(embeds).toHaveLength(1);
+      expect(embeds[0].embeds[0].description).toBe('完了しました');
+      expect(embeds[0].embeds[0].color).toBe(0x00c853);
     });
 
     it('連続したメッセージが同一セッションで処理される', () => {
       const ctx = createIntegrationContext();
-
-      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
 
       // 1つ目のメッセージ
       ctx.handleMessage(validMessage('最初のタスク'));
@@ -177,16 +195,17 @@ describe('統合テスト: コンポーネント配線', () => {
       sendStdout(proc2, JSON.stringify({ type: 'result', result: '結果2' }));
       simulateClose(proc2, 0);
 
-      expect(ctx.sentMessages).toContain('結果1');
-      expect(ctx.sentMessages).toContain('結果2');
+      const embeds = getEmbeds(ctx.sent);
+      expect(embeds).toHaveLength(2);
+      expect(embeds[0].embeds[0].description).toBe('結果1');
+      expect(embeds[1].embeds[0].description).toBe('結果2');
     });
   });
 
   describe('途中経過のリアルタイム通知', () => {
-    it('ツール使用イベントがスレッドに通知される', async () => {
+    it('ツール使用イベントがプレーンテキストで通知される', async () => {
       const ctx = createIntegrationContext();
 
-      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.handleMessage(validMessage('ファイルを編集して'));
       const proc = latestProcess(ctx);
 
@@ -211,15 +230,13 @@ describe('統合テスト: コンポーネント配線', () => {
         }),
       );
 
-      await vi.waitFor(() => {
-        expect(ctx.threadMessages).toContain('🔧 Edit: src/index.ts');
-      });
+      const textMessages = getTextMessages(ctx.sent);
+      expect(textMessages).toContain('🔧 Edit: src/index.ts');
     });
 
-    it('拡張思考イベントがスレッドに通知される', async () => {
+    it('拡張思考イベントがプレーンテキストで通知される', async () => {
       const ctx = createIntegrationContext();
 
-      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.handleMessage(validMessage('分析して'));
       const proc = latestProcess(ctx);
 
@@ -237,9 +254,8 @@ describe('統合テスト: コンポーネント配線', () => {
         }),
       );
 
-      await vi.waitFor(() => {
-        expect(ctx.threadMessages).toContain('💭 コードを分析中...');
-      });
+      const textMessages = getTextMessages(ctx.sent);
+      expect(textMessages).toContain('💭 コードを分析中...');
     });
   });
 
@@ -251,11 +267,12 @@ describe('統合テスト: コンポーネント配線', () => {
         authorBot: false,
         authorId: 'unknown-user',
         channelId: 'channel1',
+        threadId: THREAD_ID,
         content: 'hello',
       });
 
       expect(ctx.mockSpawnFn).not.toHaveBeenCalled();
-      expect(ctx.sentMessages).toHaveLength(0);
+      expect(ctx.sent).toHaveLength(0);
     });
 
     it('Bot のメッセージは無視される', () => {
@@ -265,29 +282,44 @@ describe('統合テスト: コンポーネント配線', () => {
         authorBot: true,
         authorId: 'user1',
         channelId: 'channel1',
+        threadId: THREAD_ID,
         content: 'hello',
       });
 
       expect(ctx.mockSpawnFn).not.toHaveBeenCalled();
-      expect(ctx.sentMessages).toHaveLength(0);
+      expect(ctx.sent).toHaveLength(0);
+    });
+
+    it('スレッド外のメッセージは無視される', () => {
+      const ctx = createIntegrationContext();
+
+      ctx.handleMessage({
+        authorBot: false,
+        authorId: 'user1',
+        channelId: 'channel1',
+        threadId: null,
+        content: 'hello',
+      });
+
+      expect(ctx.mockSpawnFn).not.toHaveBeenCalled();
+      expect(ctx.sent).toHaveLength(0);
     });
   });
 
   describe('コマンド処理', () => {
-    it('処理中に入力すると「処理中です」と通知される', () => {
+    it('処理中に入力すると「処理中です」とスレッドに通知される', () => {
       const ctx = createIntegrationContext();
 
-      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.handleMessage(validMessage('長い処理'));
       ctx.handleMessage(validMessage('もう一つ'));
 
-      expect(ctx.sentMessages).toContain('処理中です');
+      const textMessages = getTextMessages(ctx.sent);
+      expect(textMessages).toContain('処理中です');
     });
 
     it('/cc interrupt でプロセスが中断される', () => {
       const ctx = createIntegrationContext();
 
-      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.handleMessage(validMessage('長い処理'));
       const proc = latestProcess(ctx);
       const killSpy = vi.spyOn(proc, 'kill');
@@ -299,56 +331,80 @@ describe('統合テスト: コンポーネント配線', () => {
       // プロセス終了をシミュレート
       simulateClose(proc, 0);
 
-      expect(ctx.sentMessages).toContain('中断しました');
-    });
-
-    it('/cc new でセッションがリセットされ、新しいセッションで再開できる', () => {
-      const ctx = createIntegrationContext();
-
-      // セッションを開始
-      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
-      ctx.handleMessage(validMessage('最初のタスク'));
-      const proc1 = latestProcess(ctx);
-      sendStdout(proc1, JSON.stringify({ type: 'result', result: '結果' }));
-      simulateClose(proc1, 0);
-
-      // /cc new でリセット
-      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
-      expect(
-        ctx.sentMessages.some((m) => /^新しいセッションを開始しました \[.{8}\]$/.test(m)),
-      ).toBe(true);
-
-      // 新しいセッションでメッセージを送信
-      ctx.handleMessage(validMessage('新しいタスク'));
-      const proc2 = latestProcess(ctx);
-
-      // 異なる session-id が使われている
-      const sessionId1 =
-        ctx.mockSpawnFn.mock.calls[0][1][
-          ctx.mockSpawnFn.mock.calls[0][1].indexOf('--session-id') + 1
-        ];
-      const sessionId2 =
-        ctx.mockSpawnFn.mock.calls[1][1][
-          ctx.mockSpawnFn.mock.calls[1][1].indexOf('--session-id') + 1
-        ];
-      expect(sessionId1).not.toBe(sessionId2);
-
-      sendStdout(proc2, JSON.stringify({ type: 'result', result: '新しい結果' }));
-      simulateClose(proc2, 0);
+      const textMessages = getTextMessages(ctx.sent);
+      expect(textMessages).toContain('中断しました');
     });
   });
 
   describe('エラーハンドリング', () => {
-    it('ClaudeCode が異常終了した場合、エラーが通知される', () => {
+    it('ClaudeCode が異常終了した場合、エラーが Embed で通知される', () => {
       const ctx = createIntegrationContext();
 
-      ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.handleMessage(validMessage('hello'));
       const proc = latestProcess(ctx);
 
       simulateClose(proc, 1);
 
-      expect(ctx.sentMessages.some((msg) => msg.includes('エラー'))).toBe(true);
+      // error は usage 到着後に Embed で送信される
+      const embeds = getEmbeds(ctx.sent);
+      expect(embeds).toHaveLength(1);
+      expect(embeds[0].embeds[0].color).toBe(0xff1744);
+      expect(embeds[0].embeds[0].title).toContain('エラー');
+    });
+  });
+
+  describe('並列セッション', () => {
+    it('複数スレッドで独立したセッションが並列に動作する', () => {
+      const ctx = createIntegrationContext();
+
+      // 2つ目のセッションを作成
+      const sent2: SentItem[] = [];
+      const mockThread2: ThreadSender = {
+        send: vi.fn((content: string | SendOptions) => {
+          sent2.push({ type: typeof content === 'string' ? 'text' : 'embed', content });
+          return Promise.resolve();
+        }),
+      };
+
+      const session2 = new Session(CONFIG.workDir);
+      let onProgress2: (event: ProgressEvent) => void = () => {};
+      let onProcessEnd2: (exitCode: number, output: string) => void = () => {};
+      const claudeProcess2 = new ClaudeProcess(
+        CONFIG.claudePath,
+        (event) => onProgress2(event),
+        (exitCode, output) => onProcessEnd2(exitCode, output),
+        ctx.mockSpawnFn,
+      );
+      const notifier2 = createNotifier(mockThread2);
+      const orchestrator2 = new Orchestrator(session2, claudeProcess2, notifier2);
+      onProgress2 = (event) => orchestrator2.onProgress(event);
+      onProcessEnd2 = (exitCode, output) => orchestrator2.onProcessEnd(exitCode, output);
+      session2.ensure();
+
+      ctx.sessionManager.register('thread-2', {
+        orchestrator: orchestrator2,
+        session: session2,
+        claudeProcess: claudeProcess2,
+        threadId: 'thread-2',
+      });
+
+      // スレッド1にメッセージ送信
+      ctx.handleMessage(validMessage('タスクA'));
+      expect(ctx.mockSpawnFn).toHaveBeenCalledTimes(1);
+
+      // スレッド2にメッセージ送信（スレッド1がbusy中でもOK）
+      ctx.handleMessage({
+        authorBot: false,
+        authorId: 'user1',
+        channelId: 'channel1',
+        threadId: 'thread-2',
+        content: 'タスクB',
+      });
+      expect(ctx.mockSpawnFn).toHaveBeenCalledTimes(2);
+
+      // 両方とも別のプロンプトで起動されている
+      expect(ctx.mockSpawnFn.mock.calls[0][1]).toContain('タスクA');
+      expect(ctx.mockSpawnFn.mock.calls[1][1]).toContain('タスクB');
     });
   });
 });

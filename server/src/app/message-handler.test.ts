@@ -2,31 +2,21 @@ import { describe, it, expect } from 'vitest';
 import { AccessControl } from '../domain/access-control.js';
 import { Orchestrator } from '../domain/orchestrator.js';
 import { Session } from '../domain/session.js';
+import { SessionManager } from '../domain/session-manager.js';
 import type { IClaudeProcess, Notification, SessionOptions } from '../domain/types.js';
-import { createMessageHandler } from './message-handler.js';
+import { createMessageHandler, type DiscordMessage } from './message-handler.js';
 
 // --- テスト用モック ---
 
 class MockClaudeProcess implements IClaudeProcess {
   isRunning = false;
-  spawnCalls: Array<{
-    prompt: string;
-    sessionId: string;
-    workDir: string;
-    resume: boolean;
-    options?: SessionOptions;
-  }> = [];
+  spawnCalls: Array<{ prompt: string }> = [];
   interruptCalls = 0;
 
-  spawn(
-    prompt: string,
-    sessionId: string,
-    workDir: string,
-    resume: boolean,
-    options?: SessionOptions,
-  ): void {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  spawn(prompt: string, _sid: string, _wd: string, _r: boolean, _o?: SessionOptions): void {
     this.isRunning = true;
-    this.spawnCalls.push({ prompt, sessionId, workDir, resume, options });
+    this.spawnCalls.push({ prompt });
   }
 
   interrupt(): void {
@@ -49,20 +39,30 @@ function createTestContext() {
     allowedUserIds: [ALLOWED_USER_ID, 'user2'],
     channelId: CHANNEL_ID,
   });
-  const session = new Session(WORK_DIR);
-  const mockProcess = new MockClaudeProcess();
-  const notifications: Notification[] = [];
-  const notify = (n: Notification) => notifications.push(n);
-  const orchestrator = new Orchestrator(session, mockProcess, notify);
-  const handler = createMessageHandler(accessControl, orchestrator);
-  return { handler, orchestrator, mockProcess, notifications };
+  const sessionManager = new SessionManager();
+  const handler = createMessageHandler(accessControl, sessionManager);
+
+  function registerSession(threadId: string) {
+    const session = new Session(WORK_DIR);
+    const mockProcess = new MockClaudeProcess();
+    const notifications: Notification[] = [];
+    const notify = (n: Notification) => notifications.push(n);
+    const orchestrator = new Orchestrator(session, mockProcess, notify);
+    session.ensure();
+    const ctx = { orchestrator, session, claudeProcess: mockProcess, threadId };
+    sessionManager.register(threadId, ctx);
+    return { orchestrator, session, mockProcess: mockProcess, notifications };
+  }
+
+  return { handler, sessionManager, registerSession };
 }
 
-function validMessage(content: string) {
+function validThreadMessage(threadId: string, content: string): DiscordMessage {
   return {
     authorBot: false,
     authorId: ALLOWED_USER_ID,
     channelId: CHANNEL_ID,
+    threadId,
     content,
   };
 }
@@ -76,85 +76,109 @@ describe('createMessageHandler', () => {
 
   describe('メッセージのフィルタリング', () => {
     it('Bot のメッセージは無視される', () => {
-      const { handler, mockProcess, notifications } = createTestContext();
+      const { handler, registerSession } = createTestContext();
+      const { mockProcess } = registerSession('thread-1');
 
       handler({
         authorBot: true,
         authorId: ALLOWED_USER_ID,
         channelId: CHANNEL_ID,
+        threadId: 'thread-1',
         content: 'hello',
       });
 
       expect(mockProcess.spawnCalls).toHaveLength(0);
-      expect(notifications).toHaveLength(0);
     });
 
     it('許可されていないユーザーのメッセージは無視される', () => {
-      const { handler, mockProcess, notifications } = createTestContext();
+      const { handler, registerSession } = createTestContext();
+      const { mockProcess } = registerSession('thread-1');
 
       handler({
         authorBot: false,
         authorId: 'unknown-user',
         channelId: CHANNEL_ID,
+        threadId: 'thread-1',
         content: 'hello',
       });
 
       expect(mockProcess.spawnCalls).toHaveLength(0);
-      expect(notifications).toHaveLength(0);
     });
 
     it('異なるチャンネルのメッセージは無視される', () => {
-      const { handler, mockProcess, notifications } = createTestContext();
+      const { handler, registerSession } = createTestContext();
+      const { mockProcess } = registerSession('thread-1');
 
       handler({
         authorBot: false,
         authorId: ALLOWED_USER_ID,
         channelId: 'wrong-channel',
+        threadId: 'thread-1',
         content: 'hello',
       });
 
       expect(mockProcess.spawnCalls).toHaveLength(0);
-      expect(notifications).toHaveLength(0);
+    });
+
+    it('スレッド外のメッセージは無視される', () => {
+      const { handler, registerSession } = createTestContext();
+      const { mockProcess } = registerSession('thread-1');
+
+      handler({
+        authorBot: false,
+        authorId: ALLOWED_USER_ID,
+        channelId: CHANNEL_ID,
+        threadId: null,
+        content: 'hello',
+      });
+
+      expect(mockProcess.spawnCalls).toHaveLength(0);
+    });
+
+    it('未登録スレッドのメッセージは無視される', () => {
+      const { handler } = createTestContext();
+
+      handler(validThreadMessage('unknown-thread', 'hello'));
+      // エラーにならないことを確認
     });
   });
 
   // ----- プロンプトとしての処理 -----
 
   describe('プロンプトとしての処理', () => {
-    it('セッション開始前のメッセージはセッション開始を促す', () => {
-      const { handler, notifications } = createTestContext();
+    it('登録済みスレッドのメッセージが正しいセッションにルーティングされる', () => {
+      const { handler, registerSession } = createTestContext();
+      const { mockProcess } = registerSession('thread-1');
 
-      handler(validMessage('hello'));
-
-      expect(notifications).toHaveLength(1);
-      expect(notifications[0]).toEqual({
-        type: 'info',
-        message: '`/cc new` でセッションを開始してください',
-      });
-    });
-
-    it('セッション開始後のメッセージは Orchestrator に渡される', () => {
-      const { handler, orchestrator, mockProcess } = createTestContext();
-
-      orchestrator.handleCommand({ type: 'new', options: {} });
-      handler(validMessage('hello'));
+      handler(validThreadMessage('thread-1', 'テスト追加して'));
 
       expect(mockProcess.spawnCalls).toHaveLength(1);
-      expect(mockProcess.spawnCalls[0].prompt).toBe('hello');
+      expect(mockProcess.spawnCalls[0].prompt).toBe('テスト追加して');
     });
 
-    it('複数メッセージが順番に処理される', () => {
-      const { handler, orchestrator, mockProcess } = createTestContext();
+    it('複数スレッドへのメッセージが正しいセッションにルーティングされる', () => {
+      const { handler, registerSession } = createTestContext();
+      const s1 = registerSession('thread-1');
+      const s2 = registerSession('thread-2');
 
-      orchestrator.handleCommand({ type: 'new', options: {} });
+      handler(validThreadMessage('thread-1', 'task A'));
+      handler(validThreadMessage('thread-2', 'task B'));
 
-      handler(validMessage('first task'));
+      expect(s1.mockProcess.spawnCalls[0].prompt).toBe('task A');
+      expect(s2.mockProcess.spawnCalls[0].prompt).toBe('task B');
+    });
+
+    it('同一スレッドで複数メッセージが順番に処理される', () => {
+      const { handler, registerSession } = createTestContext();
+      const { orchestrator, mockProcess } = registerSession('thread-1');
+
+      handler(validThreadMessage('thread-1', 'first task'));
       expect(mockProcess.spawnCalls).toHaveLength(1);
 
       mockProcess.simulateEnd();
       orchestrator.onProcessEnd(0, 'result');
 
-      handler(validMessage('second task'));
+      handler(validThreadMessage('thread-1', 'second task'));
       expect(mockProcess.spawnCalls).toHaveLength(2);
       expect(mockProcess.spawnCalls[1].prompt).toBe('second task');
     });

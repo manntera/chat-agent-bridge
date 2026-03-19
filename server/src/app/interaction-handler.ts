@@ -1,18 +1,19 @@
 import type { AccessControl, MessageContext } from '../domain/access-control.js';
-import type { Orchestrator } from '../domain/orchestrator.js';
+import type { SessionManager } from '../domain/session-manager.js';
 import type { Command, Effort, SessionOptions } from '../domain/types.js';
 
 export interface InteractionContext extends MessageContext {
   subcommand: string;
   model?: string;
   effort?: string;
+  threadId: string | null;
 }
 
 export type InteractionHandlerFn = (context: InteractionContext) => void;
 
 const VALID_EFFORTS = new Set<string>(['medium', 'high', 'max']);
 
-function toCommand(context: InteractionContext): Command | null {
+export function toCommand(context: InteractionContext): Command | null {
   switch (context.subcommand) {
     case 'new': {
       const options: SessionOptions = {};
@@ -30,12 +31,17 @@ function toCommand(context: InteractionContext): Command | null {
 
 export function createInteractionHandler(
   accessControl: AccessControl,
-  orchestrator: Orchestrator,
+  sessionManager: SessionManager,
 ): InteractionHandlerFn {
   return (context: InteractionContext): void => {
     if (!accessControl.check(context)) return;
+
     const command = toCommand(context);
     if (command === null) return;
-    orchestrator.handleCommand(command);
+
+    if (command.type === 'interrupt' && context.threadId) {
+      const ctx = sessionManager.get(context.threadId);
+      if (ctx) ctx.orchestrator.handleCommand(command);
+    }
   };
 }

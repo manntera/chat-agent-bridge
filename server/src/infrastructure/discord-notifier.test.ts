@@ -1,343 +1,280 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { ChannelSender, Threadable, ThreadSender } from './discord-notifier.js';
+import type { SendOptions, ThreadSender } from './discord-notifier.js';
 import { createNotifier } from './discord-notifier.js';
+import type { UsageInfo } from '../domain/types.js';
 
 // --- モック用ヘルパー ---
 
+interface SentItem {
+  type: 'text' | 'embed';
+  content: string | SendOptions;
+}
+
 function createMockThread() {
-  const messages: string[] = [];
+  const sent: SentItem[] = [];
   const thread: ThreadSender = {
-    send: vi.fn((content: string) => {
-      messages.push(content);
-      return Promise.resolve();
-    }),
-    setArchived: vi.fn(() => Promise.resolve()),
-  };
-  return { thread, messages };
-}
-
-function createMockChannel() {
-  const channelMessages: string[] = [];
-  const channel: ChannelSender = {
-    send: vi.fn((content: string) => {
-      channelMessages.push(content);
+    send: vi.fn((content: string | SendOptions) => {
+      const type = typeof content === 'string' ? 'text' : 'embed';
+      sent.push({ type, content });
       return Promise.resolve();
     }),
   };
-  return { channel, channelMessages };
+  return { thread, sent };
 }
 
-function createMockOrigin(thread: ThreadSender): Threadable {
-  return {
-    startThread: vi.fn(() => Promise.resolve(thread)),
-  };
-}
+const usageWithData: UsageInfo = {
+  fiveHour: { utilization: 45, resetsAt: '2026-03-20T07:00:00Z' },
+  sevenDay: { utilization: 30, resetsAt: '2026-03-22T02:00:00Z' },
+  sevenDaySonnet: null,
+};
+
+const usageEmpty: UsageInfo = {
+  fiveHour: null,
+  sevenDay: null,
+  sevenDaySonnet: null,
+};
 
 // =================================================================
 // テスト本体
 // =================================================================
 
 describe('createNotifier', () => {
-  // ----- info 通知 -----
-
-  describe('info 通知', () => {
-    it('メインチャンネルにメッセージを送信する', () => {
-      const { channel, channelMessages } = createMockChannel();
-      const notify = createNotifier(channel);
-
-      notify({ type: 'info', message: '処理中です' });
-
-      expect(channelMessages).toEqual(['処理中です']);
-    });
-  });
-
-  // ----- result 通知 -----
-
-  describe('result 通知', () => {
-    it('メインチャンネルにテキストを送信する', () => {
-      const { channel, channelMessages } = createMockChannel();
-      const notify = createNotifier(channel);
-
-      notify({ type: 'result', text: 'ClaudeCode の応答' });
-
-      expect(channelMessages).toEqual(['ClaudeCode の応答']);
-    });
-
-    it('2000文字を超えるテキストは分割して送信する', () => {
-      const { channel, channelMessages } = createMockChannel();
-      const notify = createNotifier(channel);
-
-      const longText = 'A'.repeat(4500);
-      notify({ type: 'result', text: longText });
-
-      expect(channelMessages).toHaveLength(3);
-      expect(channelMessages[0]).toHaveLength(2000);
-      expect(channelMessages[1]).toHaveLength(2000);
-      expect(channelMessages[2]).toHaveLength(500);
-      expect(channelMessages.join('')).toBe(longText);
-    });
-
-    it('ちょうど2000文字のテキストは分割されない', () => {
-      const { channel, channelMessages } = createMockChannel();
-      const notify = createNotifier(channel);
-
-      const exactText = 'B'.repeat(2000);
-      notify({ type: 'result', text: exactText });
-
-      expect(channelMessages).toHaveLength(1);
-      expect(channelMessages[0]).toBe(exactText);
-    });
-
-    it('空文字列の result はそのまま送信する', () => {
-      const { channel, channelMessages } = createMockChannel();
-      const notify = createNotifier(channel);
-
-      notify({ type: 'result', text: '' });
-
-      expect(channelMessages).toEqual(['']);
-    });
-  });
-
-  // ----- error 通知 -----
-
-  describe('error 通知', () => {
-    it('メインチャンネルにエラー接頭辞付きで送信する', () => {
-      const { channel, channelMessages } = createMockChannel();
-      const notify = createNotifier(channel);
-
-      notify({ type: 'error', message: 'spawn failed', exitCode: 1 });
-
-      expect(channelMessages).toHaveLength(1);
-      expect(channelMessages[0]).toContain('エラー');
-      expect(channelMessages[0]).toContain('exit 1');
-      expect(channelMessages[0]).toContain('spawn failed');
-    });
-  });
-
-  // ----- progress 通知（スレッド） -----
+  // ----- progress 通知 -----
 
   describe('progress 通知', () => {
-    it('started イベントを「📨 受信しました」としてスレッドに送信する', async () => {
-      const { channel } = createMockChannel();
-      const { thread, messages: threadMessages } = createMockThread();
-      const notify = createNotifier(channel);
+    it('started イベントをプレーンテキストで送信する', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
 
-      notify.setThreadOrigin(createMockOrigin(thread));
-      notify({
-        type: 'progress',
-        event: { kind: 'started' },
-      });
+      notify({ type: 'progress', event: { kind: 'started' } });
 
-      await vi.waitFor(() => {
-        expect(threadMessages).toHaveLength(1);
-      });
-      expect(threadMessages[0]).toBe('📨 受信しました。処理を開始します...');
+      expect(sent).toHaveLength(1);
+      expect(sent[0].type).toBe('text');
+      expect(sent[0].content).toBe('📨 受信しました。処理を開始します...');
     });
 
-    it('ツール使用イベントをスレッドに送信する', async () => {
-      const { channel } = createMockChannel();
-      const { thread, messages: threadMessages } = createMockThread();
-      const notify = createNotifier(channel);
+    it('ツール使用イベントをプレーンテキストで送信する', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
 
-      notify.setThreadOrigin(createMockOrigin(thread));
       notify({
         type: 'progress',
         event: { kind: 'tool_use', toolName: 'Edit', target: 'src/index.ts' },
       });
 
-      await vi.waitFor(() => {
-        expect(threadMessages).toHaveLength(1);
-      });
-      expect(threadMessages[0]).toContain('Edit');
-      expect(threadMessages[0]).toContain('src/index.ts');
+      expect(sent).toHaveLength(1);
+      expect(sent[0].type).toBe('text');
+      expect(sent[0].content).toContain('Edit');
+      expect(sent[0].content).toContain('src/index.ts');
     });
 
-    it('拡張思考イベントが省略されずに全文送信される', async () => {
-      const { channel } = createMockChannel();
-      const { thread, messages: threadMessages } = createMockThread();
-      const notify = createNotifier(channel);
+    it('拡張思考イベントをプレーンテキストで送信する', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
 
-      const longText = 'A'.repeat(500);
-      notify.setThreadOrigin(createMockOrigin(thread));
-      notify({
-        type: 'progress',
-        event: { kind: 'thinking', text: longText },
-      });
+      notify({ type: 'progress', event: { kind: 'thinking', text: 'コードを分析中...' } });
 
-      await vi.waitFor(() => {
-        expect(threadMessages).toHaveLength(1);
-      });
-      expect(threadMessages[0]).toBe(`💭 ${longText}`);
-      expect(threadMessages[0]).not.toContain('...');
-    });
-
-    it('拡張思考イベントをスレッドに送信する', async () => {
-      const { channel } = createMockChannel();
-      const { thread, messages: threadMessages } = createMockThread();
-      const notify = createNotifier(channel);
-
-      notify.setThreadOrigin(createMockOrigin(thread));
-      notify({
-        type: 'progress',
-        event: { kind: 'thinking', text: 'コードの構造を分析中...' },
-      });
-
-      await vi.waitFor(() => {
-        expect(threadMessages).toHaveLength(1);
-      });
-      expect(threadMessages[0]).toContain('コードの構造を分析中...');
-    });
-
-    it('ユーザーのメッセージからスレッドが作成される', async () => {
-      const { channel } = createMockChannel();
-      const { thread, messages: threadMessages } = createMockThread();
-      const origin = createMockOrigin(thread);
-      const notify = createNotifier(channel);
-
-      notify.setThreadOrigin(origin);
-      notify({
-        type: 'progress',
-        event: { kind: 'tool_use', toolName: 'Read', target: 'file.ts' },
-      });
-
-      await vi.waitFor(() => {
-        expect(threadMessages).toHaveLength(1);
-      });
-      expect(origin.startThread).toHaveBeenCalledWith({ name: '途中経過' });
-    });
-
-    it('複数の progress イベントで同一スレッドを再利用する', async () => {
-      const { channel } = createMockChannel();
-      const { thread, messages: threadMessages } = createMockThread();
-      const origin = createMockOrigin(thread);
-      const notify = createNotifier(channel);
-
-      notify.setThreadOrigin(origin);
-      notify({
-        type: 'progress',
-        event: { kind: 'tool_use', toolName: 'Read', target: 'a.ts' },
-      });
-      notify({
-        type: 'progress',
-        event: { kind: 'tool_use', toolName: 'Edit', target: 'b.ts' },
-      });
-
-      await vi.waitFor(() => {
-        expect(threadMessages).toHaveLength(2);
-      });
-      expect(origin.startThread).toHaveBeenCalledTimes(1);
-    });
-
-    it('usage 通知後にスレッドがアーカイブされる', async () => {
-      const { channel } = createMockChannel();
-      const { thread, messages: threadMessages } = createMockThread();
-      const notify = createNotifier(channel);
-
-      notify.setThreadOrigin(createMockOrigin(thread));
-      notify({
-        type: 'progress',
-        event: { kind: 'started' },
-      });
-      await vi.waitFor(() => {
-        expect(threadMessages).toHaveLength(1);
-      });
-
-      notify({ type: 'result', text: '完了' });
-      notify({
-        type: 'usage',
-        usage: {
-          fiveHour: { utilization: 10, resetsAt: '2026-03-19T07:00:00Z' },
-          sevenDay: null,
-          sevenDaySonnet: null,
-        },
-      });
-
-      await vi.waitFor(() => {
-        expect(threadMessages).toHaveLength(2);
-        expect(threadMessages[1]).toBe('📊 利用状況: 5h 10%');
-        expect(thread.setArchived).toHaveBeenCalledWith(true);
-      });
-    });
-
-    it('error 後に usage 通知でスレッドがアーカイブされる', async () => {
-      const { channel } = createMockChannel();
-      const { thread, messages: threadMessages } = createMockThread();
-      const notify = createNotifier(channel);
-
-      notify.setThreadOrigin(createMockOrigin(thread));
-      notify({
-        type: 'progress',
-        event: { kind: 'started' },
-      });
-      await vi.waitFor(() => {
-        expect(threadMessages).toHaveLength(1);
-      });
-
-      notify({ type: 'error', message: 'failed', exitCode: 1 });
-      notify({
-        type: 'usage',
-        usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
-      });
-
-      await vi.waitFor(() => {
-        expect(thread.setArchived).toHaveBeenCalledWith(true);
-      });
-    });
-
-    it('スレッド未作成時の result ではアーカイブしない', () => {
-      const { channel } = createMockChannel();
-      const notify = createNotifier(channel);
-
-      // progress を送らずに result だけ送る（スレッド未作成）
-      expect(() => notify({ type: 'result', text: '完了' })).not.toThrow();
-    });
-
-    it('usage 後の progress では新しいスレッドを作成する', async () => {
-      const { channel } = createMockChannel();
-      const { thread: thread1, messages: threadMessages1 } = createMockThread();
-      const { thread: thread2, messages: threadMessages2 } = createMockThread();
-      const notify = createNotifier(channel);
-
-      // 1回目のタスク
-      notify.setThreadOrigin(createMockOrigin(thread1));
-      notify({
-        type: 'progress',
-        event: { kind: 'tool_use', toolName: 'Read', target: 'a.ts' },
-      });
-      await vi.waitFor(() => {
-        expect(threadMessages1).toHaveLength(1);
-      });
-
-      // result + usage でスレッドリセット
-      notify({ type: 'result', text: '完了' });
-      notify({
-        type: 'usage',
-        usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
-      });
-      await vi.waitFor(() => {
-        expect(thread1.setArchived).toHaveBeenCalledWith(true);
-      });
-
-      // 2回目のタスク
-      notify.setThreadOrigin(createMockOrigin(thread2));
-      notify({
-        type: 'progress',
-        event: { kind: 'tool_use', toolName: 'Edit', target: 'b.ts' },
-      });
-      await vi.waitFor(() => {
-        expect(threadMessages2).toHaveLength(1);
-      });
+      expect(sent).toHaveLength(1);
+      expect(sent[0].type).toBe('text');
+      expect(sent[0].content).toBe('💭 コードを分析中...');
     });
   });
 
-  // ----- 送信エラーのハンドリング -----
+  // ----- info 通知 -----
+
+  describe('info 通知', () => {
+    it('プレーンテキストで送信する', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'info', message: 'セッションを開始しました' });
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].type).toBe('text');
+      expect(sent[0].content).toBe('セッションを開始しました');
+    });
+  });
+
+  // ----- result + usage 通知 -----
+
+  describe('result + usage 通知', () => {
+    it('result は usage が来るまでバッファされる', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'result', text: 'テストを追加しました' });
+
+      expect(sent).toHaveLength(0); // まだ送信されない
+    });
+
+    it('usage 到着時に result を緑色 Embed で送信する', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'result', text: 'テストを追加しました' });
+      notify({ type: 'usage', usage: usageEmpty });
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].type).toBe('embed');
+      const options = sent[0].content as SendOptions;
+      expect(options.embeds[0].color).toBe(0x00c853);
+      expect(options.embeds[0].description).toBe('テストを追加しました');
+    });
+
+    it('usage データがある場合はフッターに含まれる', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'result', text: '完了' });
+      notify({ type: 'usage', usage: usageWithData });
+
+      expect(sent).toHaveLength(1);
+      const options = sent[0].content as SendOptions;
+      expect(options.embeds[0].footer?.text).toBe('📊 5h 45% | 7d 30%');
+    });
+
+    it('usage データがない場合はフッターなし', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'result', text: '完了' });
+      notify({ type: 'usage', usage: usageEmpty });
+
+      const options = sent[0].content as SendOptions;
+      expect(options.embeds[0].footer).toBeUndefined();
+    });
+
+    it('4096 文字超の result はプレーンテキスト分割 + フッター Embed', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      const longText = 'A'.repeat(5000);
+      notify({ type: 'result', text: longText });
+      notify({ type: 'usage', usage: usageWithData });
+
+      // 5000文字 → 2000 + 2000 + 1000 のプレーンテキスト + 1 Embed
+      expect(sent).toHaveLength(4);
+      expect(sent[0].type).toBe('text');
+      expect(sent[1].type).toBe('text');
+      expect(sent[2].type).toBe('text');
+      expect(sent[3].type).toBe('embed');
+      const options = sent[3].content as SendOptions;
+      expect(options.embeds[0].color).toBe(0x00c853);
+      expect(options.embeds[0].footer?.text).toBe('📊 5h 45% | 7d 30%');
+      expect(options.embeds[0].description).toBeUndefined();
+    });
+  });
+
+  // ----- error + usage 通知 -----
+
+  describe('error + usage 通知', () => {
+    it('error は usage が来るまでバッファされる', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'error', message: 'spawn failed', exitCode: 1 });
+
+      expect(sent).toHaveLength(0);
+    });
+
+    it('usage 到着時に error を赤色 Embed で送信する', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'error', message: 'spawn failed', exitCode: 1 });
+      notify({ type: 'usage', usage: usageEmpty });
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].type).toBe('embed');
+      const options = sent[0].content as SendOptions;
+      expect(options.embeds[0].color).toBe(0xff1744);
+      expect(options.embeds[0].title).toBe('エラー (exit 1)');
+      expect(options.embeds[0].description).toBe('spawn failed');
+    });
+
+    it('error にも usage フッターが付く', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'error', message: 'failed', exitCode: 2 });
+      notify({ type: 'usage', usage: usageWithData });
+
+      const options = sent[0].content as SendOptions;
+      expect(options.embeds[0].footer?.text).toBe('📊 5h 45% | 7d 30%');
+    });
+  });
+
+  // ----- usage のみ（result/error なし） -----
+
+  describe('usage のみ', () => {
+    it('バッファされた result がない場合、usage データがあれば Embed で送信する', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'usage', usage: usageWithData });
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].type).toBe('embed');
+      const options = sent[0].content as SendOptions;
+      expect(options.embeds[0].footer?.text).toBe('📊 5h 45% | 7d 30%');
+    });
+
+    it('バッファされた result がなく usage データもない場合は何も送信しない', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'usage', usage: usageEmpty });
+
+      expect(sent).toHaveLength(0);
+    });
+  });
+
+  // ----- 複合シナリオ -----
+
+  describe('複合シナリオ', () => {
+    it('progress → result → usage の完全フロー', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'progress', event: { kind: 'started' } });
+      notify({ type: 'progress', event: { kind: 'tool_use', toolName: 'Edit', target: 'a.ts' } });
+      notify({ type: 'result', text: '完了しました' });
+      notify({ type: 'usage', usage: usageWithData });
+
+      expect(sent).toHaveLength(3); // 2 progress + 1 embed
+      expect(sent[0].type).toBe('text');
+      expect(sent[1].type).toBe('text');
+      expect(sent[2].type).toBe('embed');
+      const options = sent[2].content as SendOptions;
+      expect(options.embeds[0].color).toBe(0x00c853);
+      expect(options.embeds[0].description).toBe('完了しました');
+      expect(options.embeds[0].footer?.text).toBe('📊 5h 45% | 7d 30%');
+    });
+
+    it('progress → error → usage の完全フロー', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'progress', event: { kind: 'started' } });
+      notify({ type: 'error', message: 'command failed', exitCode: 1 });
+      notify({ type: 'usage', usage: usageWithData });
+
+      expect(sent).toHaveLength(2); // 1 progress + 1 embed
+      expect(sent[0].type).toBe('text');
+      expect(sent[1].type).toBe('embed');
+      const options = sent[1].content as SendOptions;
+      expect(options.embeds[0].color).toBe(0xff1744);
+    });
+  });
+
+  // ----- 送信エラー -----
 
   describe('送信エラー', () => {
-    it('send が失敗してもエラーを投げない（fire-and-forget）', () => {
-      const channel: ChannelSender = {
+    it('send が失敗してもエラーを投げない', () => {
+      const thread: ThreadSender = {
         send: vi.fn(() => Promise.reject(new Error('network error'))),
       };
-      const notify = createNotifier(channel);
+      const notify = createNotifier(thread);
 
       expect(() => notify({ type: 'info', message: 'test' })).not.toThrow();
     });

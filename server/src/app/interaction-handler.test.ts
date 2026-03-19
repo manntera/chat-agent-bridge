@@ -2,31 +2,23 @@ import { describe, it, expect } from 'vitest';
 import { AccessControl } from '../domain/access-control.js';
 import { Orchestrator } from '../domain/orchestrator.js';
 import { Session } from '../domain/session.js';
+import { SessionManager } from '../domain/session-manager.js';
 import type { IClaudeProcess, Notification, SessionOptions } from '../domain/types.js';
-import { createInteractionHandler, type InteractionContext } from './interaction-handler.js';
+import {
+  createInteractionHandler,
+  toCommand,
+  type InteractionContext,
+} from './interaction-handler.js';
 
 // --- テスト用モック ---
 
 class MockClaudeProcess implements IClaudeProcess {
   isRunning = false;
-  spawnCalls: Array<{
-    prompt: string;
-    sessionId: string;
-    workDir: string;
-    resume: boolean;
-    options?: SessionOptions;
-  }> = [];
   interruptCalls = 0;
 
-  spawn(
-    prompt: string,
-    sessionId: string,
-    workDir: string,
-    resume: boolean,
-    options?: SessionOptions,
-  ): void {
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  spawn(_p: string, _s: string, _w: string, _r: boolean, _o?: SessionOptions): void {
     this.isRunning = true;
-    this.spawnCalls.push({ prompt, sessionId, workDir, resume, options });
   }
 
   interrupt(): void {
@@ -49,13 +41,22 @@ function createTestContext() {
     allowedUserIds: [ALLOWED_USER_ID],
     channelId: CHANNEL_ID,
   });
-  const session = new Session(WORK_DIR);
-  const mockProcess = new MockClaudeProcess();
-  const notifications: Notification[] = [];
-  const notify = (n: Notification) => notifications.push(n);
-  const orchestrator = new Orchestrator(session, mockProcess, notify);
-  const handler = createInteractionHandler(accessControl, orchestrator);
-  return { handler, orchestrator, session, mockProcess, notifications };
+  const sessionManager = new SessionManager();
+  const handler = createInteractionHandler(accessControl, sessionManager);
+
+  function registerSession(threadId: string) {
+    const session = new Session(WORK_DIR);
+    const mockProcess = new MockClaudeProcess();
+    const notifications: Notification[] = [];
+    const notify = (n: Notification) => notifications.push(n);
+    const orchestrator = new Orchestrator(session, mockProcess, notify);
+    session.ensure();
+    const ctx = { orchestrator, session, claudeProcess: mockProcess, threadId };
+    sessionManager.register(threadId, ctx);
+    return { orchestrator, session, mockProcess, notifications };
+  }
+
+  return { handler, sessionManager, registerSession };
 }
 
 function validInteraction(
@@ -67,6 +68,7 @@ function validInteraction(
     authorId: ALLOWED_USER_ID,
     channelId: CHANNEL_ID,
     subcommand,
+    threadId: null,
     ...options,
   };
 }
@@ -75,134 +77,83 @@ function validInteraction(
 // テスト本体
 // =================================================================
 
+describe('toCommand', () => {
+  it('new → Command { type: "new" }', () => {
+    const cmd = toCommand(validInteraction('new', { model: 'opus', effort: 'max' }));
+    expect(cmd).toEqual({ type: 'new', options: { model: 'opus', effort: 'max' } });
+  });
+
+  it('interrupt → Command { type: "interrupt" }', () => {
+    const cmd = toCommand(validInteraction('interrupt'));
+    expect(cmd).toEqual({ type: 'interrupt' });
+  });
+
+  it('resume → null（index.ts で処理）', () => {
+    const cmd = toCommand(validInteraction('resume'));
+    expect(cmd).toBeNull();
+  });
+
+  it('不正な effort は無視される', () => {
+    const cmd = toCommand(validInteraction('new', { effort: 'invalid' }));
+    expect(cmd).toEqual({ type: 'new', options: {} });
+  });
+});
+
 describe('createInteractionHandler', () => {
   describe('アクセス制御', () => {
     it('未許可ユーザーのインタラクションは無視される', () => {
-      const { handler, notifications } = createTestContext();
-
-      handler({ authorBot: false, authorId: 'unknown', channelId: CHANNEL_ID, subcommand: 'new' });
-
-      expect(notifications).toHaveLength(0);
-    });
-
-    it('異なるチャンネルのインタラクションは無視される', () => {
-      const { handler, notifications } = createTestContext();
+      const { handler, registerSession } = createTestContext();
+      const { mockProcess } = registerSession('thread-1');
 
       handler({
         authorBot: false,
-        authorId: ALLOWED_USER_ID,
-        channelId: 'wrong',
-        subcommand: 'new',
+        authorId: 'unknown',
+        channelId: CHANNEL_ID,
+        subcommand: 'interrupt',
+        threadId: 'thread-1',
       });
 
-      expect(notifications).toHaveLength(0);
-    });
-  });
-
-  describe('/cc new', () => {
-    it('セッションを作成して Idle に遷移する', () => {
-      const { handler, orchestrator, session } = createTestContext();
-
-      handler(validInteraction('new'));
-
-      expect(orchestrator.state).toBe('idle');
-      expect(session.sessionId).not.toBeNull();
-    });
-
-    it('オプションなしで通知メッセージが送信される', () => {
-      const { handler, notifications } = createTestContext();
-
-      handler(validInteraction('new'));
-
-      expect(notifications).toHaveLength(1);
-      expect(notifications[0].type).toBe('info');
-      expect((notifications[0] as { type: 'info'; message: string }).message).toMatch(
-        /^新しいセッションを開始しました \[.{8}\]$/,
-      );
-    });
-
-    it('model と effort オプションが Session に保存される', () => {
-      const { handler, session } = createTestContext();
-
-      handler(validInteraction('new', { model: 'sonnet', effort: 'max' }));
-
-      expect(session.options).toEqual({ model: 'sonnet', effort: 'max' });
-    });
-
-    it('オプション付きの通知メッセージが送信される', () => {
-      const { handler, notifications } = createTestContext();
-
-      handler(validInteraction('new', { model: 'opus', effort: 'high' }));
-
-      expect(notifications[0].type).toBe('info');
-      expect((notifications[0] as { type: 'info'; message: string }).message).toMatch(
-        /^新しいセッションを開始しました \[.{8}\] \(model: opus, effort: high\)$/,
-      );
-    });
-
-    it('不正な effort は無視される', () => {
-      const { handler, session } = createTestContext();
-
-      handler(validInteraction('new', { effort: 'invalid' }));
-
-      expect(session.options).toEqual({});
-    });
-
-    it('Busy 中は中断処理を開始する', () => {
-      const ctx = createTestContext();
-      // Idle → Busy
-      ctx.handler(validInteraction('new'));
-      ctx.orchestrator.handleMessage('some prompt');
-      ctx.notifications.length = 0;
-
-      ctx.handler(validInteraction('new', { model: 'sonnet' }));
-
-      expect(ctx.orchestrator.state).toBe('interrupting');
-      expect(ctx.mockProcess.interruptCalls).toBe(1);
+      expect(mockProcess.interruptCalls).toBe(0);
     });
   });
 
   describe('/cc interrupt', () => {
-    it('Busy 中に中断処理を開始する', () => {
-      const ctx = createTestContext();
-      ctx.handler(validInteraction('new'));
-      ctx.orchestrator.handleMessage('task');
-      ctx.notifications.length = 0;
+    it('スレッド内で実行するとそのセッションを中断する', () => {
+      const { handler, registerSession } = createTestContext();
+      const { orchestrator, mockProcess } = registerSession('thread-1');
 
-      ctx.handler(validInteraction('interrupt'));
+      // Busy にする
+      orchestrator.handleMessage('task');
 
-      expect(ctx.orchestrator.state).toBe('interrupting');
-      expect(ctx.mockProcess.interruptCalls).toBe(1);
+      handler(validInteraction('interrupt', { threadId: 'thread-1' }));
+
+      expect(mockProcess.interruptCalls).toBe(1);
     });
 
-    it('Busy でない場合は何もしない', () => {
-      const { handler, orchestrator, notifications } = createTestContext();
+    it('スレッド外で実行すると何もしない', () => {
+      const { handler, registerSession } = createTestContext();
+      const { mockProcess } = registerSession('thread-1');
 
-      handler(validInteraction('interrupt'));
+      handler(validInteraction('interrupt', { threadId: null }));
 
-      expect(orchestrator.state).toBe('initial');
-      expect(notifications).toHaveLength(0);
+      expect(mockProcess.interruptCalls).toBe(0);
     });
-  });
 
-  describe('/cc resume', () => {
-    it('InteractionHandler では処理されない（index.ts で直接ハンドリング）', () => {
-      const { handler, orchestrator, notifications } = createTestContext();
+    it('未登録スレッドで実行すると何もしない', () => {
+      const { handler } = createTestContext();
 
-      handler(validInteraction('resume'));
-
-      expect(orchestrator.state).toBe('initial');
-      expect(notifications).toHaveLength(0);
+      handler(validInteraction('interrupt', { threadId: 'unknown-thread' }));
+      // エラーにならない
     });
   });
 
-  describe('未知のサブコマンド', () => {
-    it('無視される', () => {
-      const { handler, notifications } = createTestContext();
+  describe('/cc new', () => {
+    it('InteractionHandler では処理されない（index.ts で処理）', () => {
+      const { handler, sessionManager } = createTestContext();
 
-      handler(validInteraction('unknown'));
+      handler(validInteraction('new', { threadId: null }));
 
-      expect(notifications).toHaveLength(0);
+      expect(sessionManager.size()).toBe(0);
     });
   });
 });

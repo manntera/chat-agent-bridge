@@ -2,20 +2,22 @@ import 'dotenv/config';
 import {
   ActionRowBuilder,
   Client,
+  ChannelType,
   Events,
   GatewayIntentBits,
   StringSelectMenuBuilder,
   TextChannel,
 } from 'discord.js';
 import { createMessageHandler } from './app/message-handler.js';
-import { createInteractionHandler } from './app/interaction-handler.js';
+import { toCommand } from './app/interaction-handler.js';
 import { AccessControl } from './domain/access-control.js';
 import { Orchestrator } from './domain/orchestrator.js';
 import { Session } from './domain/session.js';
+import { SessionManager, type SessionContext } from './domain/session-manager.js';
 import type { Notification, ProgressEvent } from './domain/types.js';
 import { ClaudeProcess } from './infrastructure/claude-process.js';
 import { loadConfig } from './infrastructure/config.js';
-import { createNotifier } from './infrastructure/discord-notifier.js';
+import { createNotifier, type ThreadSender } from './infrastructure/discord-notifier.js';
 import { SessionStore } from './infrastructure/session-store.js';
 import { ccCommand } from './infrastructure/slash-commands.js';
 import { UsageFetcher } from './infrastructure/usage-fetcher.js';
@@ -95,90 +97,111 @@ async function main(): Promise<void> {
   log(`チャンネル #${channel.name} を取得しました`);
 
   // ドメインオブジェクト
-  const session = new Session(config.workDir);
   const accessControl = new AccessControl({
     allowedUserIds: config.allowedUserIds,
     channelId: config.channelId,
   });
-
-  // インフラオブジェクト + 循環依存の解決
-  const discordNotifier = createNotifier(channel);
-  const notifier = (notification: Notification): void => {
-    logNotification(notification);
-    discordNotifier(notification);
-  };
-
-  let onProgress: (event: ProgressEvent) => void = () => {};
-  let onProcessEnd: (exitCode: number, output: string) => void = () => {};
-
-  const claudeProcess = new ClaudeProcess(
-    config.claudePath,
-    (event) => onProgress(event),
-    (exitCode, output) => onProcessEnd(exitCode, output),
-  );
-
-  const usageFetcher = new UsageFetcher();
+  const sessionManager = new SessionManager();
   const sessionStore = new SessionStore();
-  const orchestrator = new Orchestrator(session, claudeProcess, notifier, usageFetcher);
+  const usageFetcher = new UsageFetcher();
 
-  onProgress = (event) => orchestrator.onProgress(event);
-  onProcessEnd = (exitCode, output) => {
-    log(`ClaudeProcess 終了 (exitCode: ${exitCode})`);
-    orchestrator.onProcessEnd(exitCode, output);
-  };
+  /** セッションコンテキストを作成し SessionManager に登録する */
+  function createSession(threadId: string, thread: ThreadSender): SessionContext {
+    const session = new Session(config.workDir);
+
+    let onProgress: (event: ProgressEvent) => void = () => {};
+    let onProcessEnd: (exitCode: number, output: string) => void = () => {};
+
+    const claudeProcess = new ClaudeProcess(
+      config.claudePath,
+      (event) => onProgress(event),
+      (exitCode, output) => onProcessEnd(exitCode, output),
+    );
+
+    const notifier = createNotifier(thread);
+    const notify = (notification: Notification): void => {
+      logNotification(notification);
+      notifier(notification);
+    };
+
+    const orchestrator = new Orchestrator(session, claudeProcess, notify, usageFetcher);
+
+    onProgress = (event) => orchestrator.onProgress(event);
+    onProcessEnd = (exitCode, output) => {
+      log(`ClaudeProcess 終了 (exitCode: ${exitCode}, thread: ${threadId})`);
+      orchestrator.onProcessEnd(exitCode, output);
+    };
+
+    const ctx: SessionContext = { orchestrator, session, claudeProcess, threadId };
+    sessionManager.register(threadId, ctx);
+    return ctx;
+  }
 
   // App 層
-  const handleMessage = createMessageHandler(accessControl, orchestrator);
-  const handleInteraction = createInteractionHandler(accessControl, orchestrator);
+  const handleMessage = createMessageHandler(accessControl, sessionManager);
 
-  // メッセージイベント（プロンプト）
+  // メッセージイベント（スレッド内のプロンプト）
   client.on(Events.MessageCreate, (msg) => {
-    if (!msg.author.bot) {
-      log(`メッセージ受信: ${msg.author.username} "${msg.content}"`);
+    if (msg.author.bot) return;
+
+    if (
+      msg.channel.type !== ChannelType.PublicThread &&
+      msg.channel.type !== ChannelType.PrivateThread
+    ) {
+      return; // チャンネル直接のメッセージは無視
     }
 
-    // プロンプト処理時にユーザーのメッセージをスレッドの起点にする
-    if (!msg.author.bot && orchestrator.state === 'idle') {
-      discordNotifier.setThreadOrigin(msg);
-    }
+    const parentChannelId = msg.channel.parentId;
+    if (!parentChannelId) return;
 
-    const prevState = orchestrator.state;
+    log(`メッセージ受信: ${msg.author.username} "${msg.content}" (thread: ${msg.channelId})`);
+
+    const ctx = sessionManager.get(msg.channelId);
+    const prevState = ctx?.orchestrator.state;
+
     handleMessage({
-      authorBot: msg.author.bot,
+      authorBot: false,
       authorId: msg.author.id,
-      channelId: msg.channelId,
+      channelId: parentChannelId,
+      threadId: msg.channelId,
       content: msg.content,
     });
-    const newState = orchestrator.state;
 
-    if (!msg.author.bot && prevState !== newState) {
-      log(`状態遷移: ${prevState} → ${newState}`);
+    const newState = ctx?.orchestrator.state;
+    if (prevState !== newState) {
+      log(`状態遷移: ${prevState} → ${newState} (thread: ${msg.channelId})`);
     }
   });
 
   // スラッシュコマンドイベント
   client.on(Events.InteractionCreate, async (interaction) => {
-    // StringSelectMenu の選択イベント
+    // StringSelectMenu の選択イベント（/cc resume のセッション選択）
     if (interaction.isStringSelectMenu() && interaction.customId === 'cc_resume_select') {
       const selectedSessionId = interaction.values[0];
       log(`セッション選択: ${interaction.user.username} ${selectedSessionId.slice(0, 8)}...`);
 
-      const currentState = orchestrator.state;
-      if (currentState === 'busy' || currentState === 'interrupting') {
+      try {
+        // スレッドを作成してセッションを登録
+        const thread = await channel.threads.create({
+          name: `Session: ${selectedSessionId.slice(0, 8)}... (再開)`,
+        });
+
+        const ctx = createSession(thread.id, thread);
+        ctx.session.restore(selectedSessionId);
+
+        await thread.send(`セッションを再開しました [\`${selectedSessionId.slice(0, 8)}\`]`);
+
         await interaction.update({
-          content: '処理中のため再開できませんでした',
+          content: `セッション \`${selectedSessionId.slice(0, 8)}...\` を再開しました → <#${thread.id}>`,
           components: [],
         });
-        return;
+      } catch (err) {
+        console.error('Resume session error:', err);
+        await interaction.update({
+          content: 'セッションの再開に失敗しました',
+          components: [],
+        });
       }
-
-      orchestrator.handleCommand({ type: 'resume', sessionId: selectedSessionId });
-      log(`状態遷移: ${currentState} → ${orchestrator.state}`);
-
-      await interaction.update({
-        content: `セッション \`${selectedSessionId.slice(0, 8)}...\` を再開しました。メッセージを送信してください。`,
-        components: [],
-      });
       return;
     }
 
@@ -188,25 +211,102 @@ async function main(): Promise<void> {
     const subcommand = interaction.options.getSubcommand();
     log(`コマンド受信: ${interaction.user.username} /cc ${subcommand}`);
 
-    // /cc resume は非同期フローのため別処理
+    // アクセス制御
+    if (
+      !accessControl.check({
+        authorBot: false,
+        authorId: interaction.user.id,
+        channelId: interaction.channelId,
+      })
+    ) {
+      await interaction.reply({ content: '権限がありません', ephemeral: true });
+      return;
+    }
+
+    // /cc new — スレッドを作成してセッションを登録
+    if (subcommand === 'new') {
+      const command = toCommand({
+        authorBot: false,
+        authorId: interaction.user.id,
+        channelId: interaction.channelId,
+        subcommand: 'new',
+        model: interaction.options.getString('model') ?? undefined,
+        effort: interaction.options.getString('effort') ?? undefined,
+        threadId: null,
+      });
+      if (!command || command.type !== 'new') return;
+
+      try {
+        const session = new Session(config.workDir);
+        session.ensure(command.options);
+        const sessionId = session.sessionId!;
+
+        const opts = command.options;
+        const details: string[] = [];
+        if (opts.model) details.push(opts.model);
+        if (opts.effort) details.push(opts.effort);
+        const suffix = details.length > 0 ? ` (${details.join(', ')})` : '';
+        const threadName = `Session: ${sessionId.slice(0, 8)}${suffix}`;
+
+        const thread = await channel.threads.create({ name: threadName });
+        const ctx = createSession(thread.id, thread);
+        // createSession 内で新しい Session を作るが、options を引き継ぐために上書き
+        ctx.session.reset();
+        ctx.session.ensure(command.options);
+
+        await thread.send(
+          `セッションを開始しました [\`${ctx.session.sessionId!.slice(0, 8)}\`]${suffix}`,
+        );
+
+        await interaction.reply({
+          content: `セッションを作成しました → <#${thread.id}>`,
+          ephemeral: true,
+        });
+
+        log(`スレッド作成: ${thread.name} (${thread.id})`);
+      } catch (err) {
+        console.error('Thread creation error:', err);
+        await interaction.reply({ content: 'スレッドの作成に失敗しました', ephemeral: true });
+      }
+      return;
+    }
+
+    // /cc interrupt — スレッド内で実行した場合のみ処理
+    if (subcommand === 'interrupt') {
+      const isThread =
+        interaction.channel?.type === ChannelType.PublicThread ||
+        interaction.channel?.type === ChannelType.PrivateThread;
+
+      if (!isThread) {
+        await interaction.reply({
+          content: 'セッションスレッド内で実行してください',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      const ctx = sessionManager.get(interaction.channelId);
+      if (!ctx) {
+        await interaction.reply({
+          content: 'このスレッドにはセッションが紐づいていません',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      if (ctx.orchestrator.state === 'busy') {
+        ctx.orchestrator.handleCommand({ type: 'interrupt' });
+        await interaction.reply({ content: '✅', ephemeral: true });
+      } else if (ctx.orchestrator.state === 'interrupting') {
+        await interaction.reply({ content: '既に中断処理中です', ephemeral: true });
+      } else {
+        await interaction.reply({ content: '処理中ではありません', ephemeral: true });
+      }
+      return;
+    }
+
+    // /cc resume — セッション一覧を表示
     if (subcommand === 'resume') {
-      if (
-        !accessControl.check({
-          authorBot: false,
-          authorId: interaction.user.id,
-          channelId: interaction.channelId,
-        })
-      ) {
-        await interaction.reply({ content: '権限がありません', ephemeral: true });
-        return;
-      }
-
-      const currentState = orchestrator.state;
-      if (currentState === 'busy' || currentState === 'interrupting') {
-        await interaction.reply({ content: '処理中です', ephemeral: true });
-        return;
-      }
-
       await interaction.deferReply({ ephemeral: true });
 
       try {
@@ -252,41 +352,6 @@ async function main(): Promise<void> {
         await interaction.editReply('セッション一覧の取得に失敗しました');
       }
       return;
-    }
-
-    const prevState = orchestrator.state;
-    handleInteraction({
-      authorBot: false,
-      authorId: interaction.user.id,
-      channelId: interaction.channelId,
-      subcommand,
-      model: interaction.options.getString('model') ?? undefined,
-      effort: interaction.options.getString('effort') ?? undefined,
-    });
-    const newState = orchestrator.state;
-
-    if (prevState !== newState) {
-      log(`状態遷移: ${prevState} → ${newState}`);
-    }
-
-    // スラッシュコマンドには必ず応答が必要（通知は orchestrator 経由で別途送信されるため ephemeral で応答）
-    if (subcommand === 'new') {
-      if (newState === 'idle') {
-        await interaction.reply({ content: '✅', ephemeral: true });
-      } else if (newState === 'interrupting') {
-        await interaction.reply({
-          content: '処理を中断して新しいセッションを開始します...',
-          ephemeral: true,
-        });
-      } else {
-        await interaction.reply({ content: '処理中です', ephemeral: true });
-      }
-    } else if (subcommand === 'interrupt') {
-      if (newState === 'interrupting') {
-        await interaction.reply({ content: '✅', ephemeral: true });
-      } else {
-        await interaction.reply({ content: '処理中ではありません', ephemeral: true });
-      }
     }
   });
 
