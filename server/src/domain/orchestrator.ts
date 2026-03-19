@@ -2,6 +2,7 @@ import type { Session } from './session.js';
 import type {
   Command,
   IClaudeProcess,
+  IUsageFetcher,
   NotifyFn,
   OrchestratorState,
   ProgressEvent,
@@ -16,6 +17,7 @@ export class Orchestrator {
     private readonly session: Session,
     private readonly claudeProcess: IClaudeProcess,
     private readonly notify: NotifyFn,
+    private readonly usageFetcher?: IUsageFetcher,
   ) {}
 
   get state(): OrchestratorState {
@@ -106,5 +108,26 @@ export class Orchestrator {
       this.notify({ type: 'info', message: this.formatNewSessionMessage() });
     }
     this.interruptReason = null;
+    this.sendUsage();
+  }
+
+  private sendUsage(): void {
+    if (!this.usageFetcher) {
+      this.notify({
+        type: 'usage',
+        usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
+      });
+      return;
+    }
+    this.usageFetcher
+      .fetch()
+      .then((usage) => this.notify({ type: 'usage', usage }))
+      .catch((err) => {
+        console.error('Usage fetch error:', err);
+        this.notify({
+          type: 'usage',
+          usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
+        });
+      });
   }
 }

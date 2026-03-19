@@ -17,13 +17,24 @@ export type ProgressEvent =
   | { kind: 'tool_use'; toolName: string; target: string }
   | { kind: 'thinking'; text: string };
 
+export interface UsageInfo {
+  fiveHour: { utilization: number; resetsAt: string } | null;
+  sevenDay: { utilization: number; resetsAt: string } | null;
+  sevenDaySonnet: { utilization: number; resetsAt: string } | null;
+}
+
 export type Notification =
   | { type: 'info'; message: string }
   | { type: 'result'; text: string }
   | { type: 'error'; message: string; exitCode: number }
-  | { type: 'progress'; event: ProgressEvent };
+  | { type: 'progress'; event: ProgressEvent }
+  | { type: 'usage'; usage: UsageInfo };
 
 export type NotifyFn = (notification: Notification) => void;
+
+export interface IUsageFetcher {
+  fetch(): Promise<UsageInfo>;
+}
 
 export interface IClaudeProcess {
   readonly isRunning: boolean;

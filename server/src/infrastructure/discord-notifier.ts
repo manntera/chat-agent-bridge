@@ -1,4 +1,4 @@
-import type { Notification, NotifyFn } from '../domain/types.js';
+import type { Notification, NotifyFn, UsageInfo } from '../domain/types.js';
 
 export interface ThreadSender {
   send(content: string): Promise<unknown>;
@@ -34,6 +34,14 @@ function formatProgress(notification: Notification & { type: 'progress' }): stri
   return `💭 ${notification.event.text}`;
 }
 
+function formatUsage(usage: UsageInfo): string {
+  const parts: string[] = [];
+  if (usage.fiveHour) parts.push(`5h ${usage.fiveHour.utilization}%`);
+  if (usage.sevenDay) parts.push(`7d ${usage.sevenDay.utilization}%`);
+  if (usage.sevenDaySonnet) parts.push(`Sonnet ${usage.sevenDaySonnet.utilization}%`);
+  return `📊 利用状況: ${parts.join(' | ') || '取得できませんでした'}`;
+}
+
 function formatNotification(notification: Notification): string[] {
   switch (notification.type) {
     case 'info':
@@ -44,6 +52,8 @@ function formatNotification(notification: Notification): string[] {
       return [`エラー (exit ${notification.exitCode}): ${notification.message}`];
     case 'progress':
       return [formatProgress(notification)];
+    case 'usage':
+      return [formatUsage(notification.usage)];
   }
 }
 
@@ -78,23 +88,33 @@ export function createNotifier(
     }
   }
 
+  function archiveThread(): void {
+    if (threadPromise) {
+      threadPromise
+        .then((thread) => thread.setArchived(true))
+        .catch((err) => console.error('Discord thread archive error:', err));
+    }
+    threadPromise = null;
+    pendingOrigin = null;
+  }
+
   const notify: NotifyFn & { setThreadOrigin(message: Threadable): void } = Object.assign(
     (notification: Notification) => {
       const messages = formatNotification(notification);
 
       if (notification.type === 'progress') {
         sendToThread(messages).catch((err) => console.error('Discord thread error:', err));
+      } else if (notification.type === 'usage') {
+        const hasData =
+          notification.usage.fiveHour !== null ||
+          notification.usage.sevenDay !== null ||
+          notification.usage.sevenDaySonnet !== null;
+        const send = hasData ? sendToThread(messages) : Promise.resolve();
+        send
+          .then(() => archiveThread())
+          .catch((err) => console.error('Discord thread error:', err));
       } else {
         sendToChannel(messages);
-        if (notification.type === 'result' || notification.type === 'error') {
-          if (threadPromise) {
-            threadPromise
-              .then((thread) => thread.setArchived(true))
-              .catch((err) => console.error('Discord thread archive error:', err));
-          }
-          threadPromise = null;
-          pendingOrigin = null;
-        }
       }
     },
     {

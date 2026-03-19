@@ -1,7 +1,14 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { Orchestrator } from './orchestrator.js';
 import { Session } from './session.js';
-import type { IClaudeProcess, Notification, ProgressEvent, SessionOptions } from './types.js';
+import type {
+  IClaudeProcess,
+  IUsageFetcher,
+  Notification,
+  ProgressEvent,
+  SessionOptions,
+  UsageInfo,
+} from './types.js';
 
 // --- テスト用モック ---
 
@@ -303,8 +310,12 @@ describe('Orchestrator', () => {
       ctx.orchestrator.onProcessEnd(0, 'result text');
 
       expect(ctx.orchestrator.state).toBe('idle');
-      expect(ctx.notifications).toHaveLength(1);
+      expect(ctx.notifications).toHaveLength(2);
       expect(ctx.notifications[0]).toEqual({ type: 'result', text: 'result text' });
+      expect(ctx.notifications[1]).toEqual({
+        type: 'usage',
+        usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
+      });
     });
 
     it('異常終了(exitCode≠0) → エラー通知, Idle', () => {
@@ -315,11 +326,15 @@ describe('Orchestrator', () => {
       ctx.orchestrator.onProcessEnd(1, 'something failed');
 
       expect(ctx.orchestrator.state).toBe('idle');
-      expect(ctx.notifications).toHaveLength(1);
+      expect(ctx.notifications).toHaveLength(2);
       expect(ctx.notifications[0]).toEqual({
         type: 'error',
         message: 'something failed',
         exitCode: 1,
+      });
+      expect(ctx.notifications[1]).toEqual({
+        type: 'usage',
+        usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
       });
     });
 
@@ -344,8 +359,12 @@ describe('Orchestrator', () => {
       ctx.orchestrator.onProcessEnd(0, '');
 
       expect(ctx.orchestrator.state).toBe('idle');
-      expect(ctx.notifications).toHaveLength(1);
+      expect(ctx.notifications).toHaveLength(2);
       expect(ctx.notifications[0]).toEqual({ type: 'info', message: '中断しました' });
+      expect(ctx.notifications[1]).toEqual({
+        type: 'usage',
+        usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
+      });
     });
 
     it('sessionId は維持される', () => {
@@ -372,10 +391,14 @@ describe('Orchestrator', () => {
       expect(ctx.orchestrator.state).toBe('idle');
       expect(ctx.session.sessionId).not.toBeNull();
       expect(ctx.session.sessionId).not.toBe(oldSessionId);
-      expect(ctx.notifications).toHaveLength(1);
+      expect(ctx.notifications).toHaveLength(2);
       expect(ctx.notifications[0]).toEqual({
         type: 'info',
         message: '新しいセッションを開始しました',
+      });
+      expect(ctx.notifications[1]).toEqual({
+        type: 'usage',
+        usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
       });
     });
   });
@@ -496,9 +519,14 @@ describe('Orchestrator', () => {
       ctx.orchestrator.onProcessEnd(0, '');
 
       expect(ctx.session.options).toEqual({ model: 'sonnet', effort: 'max' });
+      expect(ctx.notifications).toHaveLength(2);
       expect(ctx.notifications[0]).toEqual({
         type: 'info',
         message: '新しいセッションを開始しました (model: sonnet, effort: max)',
+      });
+      expect(ctx.notifications[1]).toEqual({
+        type: 'usage',
+        usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
       });
     });
   });
@@ -618,6 +646,77 @@ describe('Orchestrator', () => {
       expect(ctx.orchestrator.state).toBe('interrupting');
       expect(ctx.notifications.filter((n) => n.type === 'info')).toHaveLength(2);
       expect(ctx.mockProcess.interruptCalls).toBe(1);
+    });
+  });
+
+  // ----- UsageFetcher 連携 -----
+
+  describe('usageFetcher 連携', () => {
+    const mockUsageInfo: UsageInfo = {
+      fiveHour: { utilization: 10, resetsAt: '2026-03-19T07:00:00Z' },
+      sevenDay: { utilization: 25, resetsAt: '2026-03-21T02:00:00Z' },
+      sevenDaySonnet: null,
+    };
+
+    function createOrchestratorWithFetcher(fetcher: IUsageFetcher) {
+      const session = new Session(WORK_DIR);
+      const mockProcess = new MockClaudeProcess();
+      const notifications: Notification[] = [];
+      const notify = (n: Notification) => notifications.push(n);
+      const orchestrator = new Orchestrator(session, mockProcess, notify, fetcher);
+      return { orchestrator, session, mockProcess, notifications };
+    }
+
+    it('正常終了後に usageFetcher の結果が usage 通知として送られる', async () => {
+      const fetcher: IUsageFetcher = { fetch: vi.fn(() => Promise.resolve(mockUsageInfo)) };
+      const ctx = createOrchestratorWithFetcher(fetcher);
+      toBusy(ctx);
+
+      ctx.mockProcess.simulateEnd();
+      ctx.orchestrator.onProcessEnd(0, 'done');
+
+      // fetch は非同期なので待つ
+      await vi.waitFor(() => {
+        expect(ctx.notifications).toHaveLength(2);
+      });
+      expect(ctx.notifications[0]).toEqual({ type: 'result', text: 'done' });
+      expect(ctx.notifications[1]).toEqual({ type: 'usage', usage: mockUsageInfo });
+    });
+
+    it('usageFetcher が失敗した場合は空の usage 通知が送られる', async () => {
+      const fetcher: IUsageFetcher = {
+        fetch: vi.fn(() => Promise.reject(new Error('network error'))),
+      };
+      const ctx = createOrchestratorWithFetcher(fetcher);
+      toBusy(ctx);
+
+      ctx.mockProcess.simulateEnd();
+      ctx.orchestrator.onProcessEnd(0, 'done');
+
+      await vi.waitFor(() => {
+        expect(ctx.notifications).toHaveLength(2);
+      });
+      expect(ctx.notifications[1]).toEqual({
+        type: 'usage',
+        usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
+      });
+    });
+
+    it('中断時にも usage 通知が送られる', async () => {
+      const fetcher: IUsageFetcher = { fetch: vi.fn(() => Promise.resolve(mockUsageInfo)) };
+      const ctx = createOrchestratorWithFetcher(fetcher);
+      toBusy(ctx);
+
+      ctx.orchestrator.handleCommand({ type: 'interrupt' });
+      ctx.notifications.length = 0;
+      ctx.mockProcess.simulateEnd();
+      ctx.orchestrator.onProcessEnd(0, '');
+
+      await vi.waitFor(() => {
+        expect(ctx.notifications).toHaveLength(2);
+      });
+      expect(ctx.notifications[0]).toEqual({ type: 'info', message: '中断しました' });
+      expect(ctx.notifications[1]).toEqual({ type: 'usage', usage: mockUsageInfo });
     });
   });
 });

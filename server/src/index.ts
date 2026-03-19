@@ -10,6 +10,7 @@ import { ClaudeProcess } from './infrastructure/claude-process.js';
 import { loadConfig } from './infrastructure/config.js';
 import { createNotifier } from './infrastructure/discord-notifier.js';
 import { ccCommand } from './infrastructure/slash-commands.js';
+import { UsageFetcher } from './infrastructure/usage-fetcher.js';
 
 function log(message: string): void {
   const time = new Date().toLocaleTimeString('ja-JP', { hour12: false });
@@ -36,6 +37,15 @@ function logNotification(notification: Notification): void {
         log(`途中経過: 💭 ${notification.event.text}`);
       }
       break;
+    case 'usage': {
+      const u = notification.usage;
+      const parts: string[] = [];
+      if (u.fiveHour) parts.push(`5h ${u.fiveHour.utilization}%`);
+      if (u.sevenDay) parts.push(`7d ${u.sevenDay.utilization}%`);
+      if (u.sevenDaySonnet) parts.push(`Sonnet ${u.sevenDaySonnet.utilization}%`);
+      log(`利用状況: ${parts.join(' | ') || 'N/A'}`);
+      break;
+    }
   }
 }
 
@@ -87,7 +97,8 @@ async function main(): Promise<void> {
     (exitCode, output) => onProcessEnd(exitCode, output),
   );
 
-  const orchestrator = new Orchestrator(session, claudeProcess, notifier);
+  const usageFetcher = new UsageFetcher();
+  const orchestrator = new Orchestrator(session, claudeProcess, notifier, usageFetcher);
 
   onProgress = (event) => orchestrator.onProgress(event);
   onProcessEnd = (exitCode, output) => {

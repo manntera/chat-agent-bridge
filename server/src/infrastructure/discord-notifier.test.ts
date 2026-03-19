@@ -228,7 +228,7 @@ describe('createNotifier', () => {
       expect(origin.startThread).toHaveBeenCalledTimes(1);
     });
 
-    it('result 後にスレッドがアーカイブされる', async () => {
+    it('usage 通知後にスレッドがアーカイブされる', async () => {
       const { channel } = createMockChannel();
       const { thread, messages: threadMessages } = createMockThread();
       const notify = createNotifier(channel);
@@ -243,13 +243,23 @@ describe('createNotifier', () => {
       });
 
       notify({ type: 'result', text: '完了' });
+      notify({
+        type: 'usage',
+        usage: {
+          fiveHour: { utilization: 10, resetsAt: '2026-03-19T07:00:00Z' },
+          sevenDay: null,
+          sevenDaySonnet: null,
+        },
+      });
 
       await vi.waitFor(() => {
+        expect(threadMessages).toHaveLength(2);
+        expect(threadMessages[1]).toBe('📊 利用状況: 5h 10%');
         expect(thread.setArchived).toHaveBeenCalledWith(true);
       });
     });
 
-    it('error 後にスレッドがアーカイブされる', async () => {
+    it('error 後に usage 通知でスレッドがアーカイブされる', async () => {
       const { channel } = createMockChannel();
       const { thread, messages: threadMessages } = createMockThread();
       const notify = createNotifier(channel);
@@ -264,6 +274,10 @@ describe('createNotifier', () => {
       });
 
       notify({ type: 'error', message: 'failed', exitCode: 1 });
+      notify({
+        type: 'usage',
+        usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
+      });
 
       await vi.waitFor(() => {
         expect(thread.setArchived).toHaveBeenCalledWith(true);
@@ -278,7 +292,7 @@ describe('createNotifier', () => {
       expect(() => notify({ type: 'result', text: '完了' })).not.toThrow();
     });
 
-    it('result 後の progress では新しいスレッドを作成する', async () => {
+    it('usage 後の progress では新しいスレッドを作成する', async () => {
       const { channel } = createMockChannel();
       const { thread: thread1, messages: threadMessages1 } = createMockThread();
       const { thread: thread2, messages: threadMessages2 } = createMockThread();
@@ -294,8 +308,15 @@ describe('createNotifier', () => {
         expect(threadMessages1).toHaveLength(1);
       });
 
-      // result でスレッドリセット
+      // result + usage でスレッドリセット
       notify({ type: 'result', text: '完了' });
+      notify({
+        type: 'usage',
+        usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
+      });
+      await vi.waitFor(() => {
+        expect(thread1.setArchived).toHaveBeenCalledWith(true);
+      });
 
       // 2回目のタスク
       notify.setThreadOrigin(createMockOrigin(thread2));
