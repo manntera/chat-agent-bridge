@@ -212,11 +212,19 @@ async function main(): Promise<void> {
     log(`コマンド受信: ${interaction.user.username} /cc ${subcommand}`);
 
     // アクセス制御
+    // スレッド内のコマンドは親チャンネルIDでチェックする
+    const isThreadChannel =
+      interaction.channel?.type === ChannelType.PublicThread ||
+      interaction.channel?.type === ChannelType.PrivateThread;
+    const checkChannelId =
+      isThreadChannel && interaction.channel?.parentId
+        ? interaction.channel.parentId
+        : interaction.channelId;
     if (
       !accessControl.check({
         authorBot: false,
         authorId: interaction.user.id,
-        channelId: interaction.channelId,
+        channelId: checkChannelId,
       })
     ) {
       await interaction.reply({ content: '権限がありません', ephemeral: true });
