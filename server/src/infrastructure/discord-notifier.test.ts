@@ -151,6 +151,25 @@ describe('createNotifier', () => {
       expect(threadMessages[0]).toContain('src/index.ts');
     });
 
+    it('拡張思考イベントが省略されずに全文送信される', async () => {
+      const { channel } = createMockChannel();
+      const { thread, messages: threadMessages } = createMockThread();
+      const notify = createNotifier(channel);
+
+      const longText = 'A'.repeat(500);
+      notify.setThreadOrigin(createMockOrigin(thread));
+      notify({
+        type: 'progress',
+        event: { kind: 'thinking', text: longText },
+      });
+
+      await vi.waitFor(() => {
+        expect(threadMessages).toHaveLength(1);
+      });
+      expect(threadMessages[0]).toBe(`💭 ${longText}`);
+      expect(threadMessages[0]).not.toContain('...');
+    });
+
     it('拡張思考イベントをスレッドに送信する', async () => {
       const { channel } = createMockChannel();
       const { thread, messages: threadMessages } = createMockThread();

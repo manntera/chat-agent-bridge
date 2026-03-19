@@ -30,9 +30,7 @@ function formatProgress(notification: Notification & { type: 'progress' }): stri
   if (notification.event.kind === 'tool_use') {
     return `🔧 ${notification.event.toolName}: ${notification.event.target}`;
   }
-  const text = notification.event.text;
-  const truncated = text.length > 200 ? text.slice(0, 200) + '...' : text;
-  return `💭 ${truncated}`;
+  return `💭 ${notification.event.text}`;
 }
 
 function formatNotification(notification: Notification): string[] {

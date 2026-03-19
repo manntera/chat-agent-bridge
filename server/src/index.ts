@@ -33,9 +33,7 @@ function logNotification(notification: Notification): void {
       } else if (notification.event.kind === 'tool_use') {
         log(`途中経過: 🔧 ${notification.event.toolName}: ${notification.event.target}`);
       } else {
-        log(
-          `途中経過: 💭 ${notification.event.text.slice(0, 100)}${notification.event.text.length > 100 ? '...' : ''}`,
-        );
+        log(`途中経過: 💭 ${notification.event.text}`);
       }
       break;
   }
