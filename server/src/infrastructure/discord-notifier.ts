@@ -2,6 +2,7 @@ import type { Notification, NotifyFn } from '../domain/types.js';
 
 export interface ThreadSender {
   send(content: string): Promise<unknown>;
+  setArchived(archived: boolean): Promise<unknown>;
 }
 
 export interface Threadable {
@@ -86,6 +87,11 @@ export function createNotifier(
       } else {
         sendToChannel(messages);
         if (notification.type === 'result' || notification.type === 'error') {
+          if (threadPromise) {
+            threadPromise
+              .then((thread) => thread.setArchived(true))
+              .catch((err) => console.error('Discord thread archive error:', err));
+          }
           threadPromise = null;
           pendingOrigin = null;
         }

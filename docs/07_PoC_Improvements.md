@@ -185,7 +185,7 @@ const sessionArgs = resume
 
 1. ユーザーがメッセージ送信時に `setThreadOrigin(message)` でスレッドの起点を保持
 2. 最初の `progress` 通知時にスレッドを作成（スレッド名: 「途中経過」）
-3. `result` または `error` の送信後にスレッドをリセット（次のメッセージで新しいスレッドが作られる）
+3. `result` または `error` の送信後にスレッドをアーカイブ（`setArchived(true)`）してリセット（次のメッセージで新しいスレッドが作られる）
 
 **DiscordNotifier のインターフェース変更：**
 
@@ -201,6 +201,7 @@ interface ChannelSender {
 }
 interface ThreadSender {
   send(content: string): Promise<unknown>;
+  setArchived(archived: boolean): Promise<unknown>;
 }
 interface Threadable {
   startThread(options: { name: string }): Promise<ThreadSender>;

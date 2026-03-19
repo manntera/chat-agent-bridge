@@ -11,6 +11,7 @@ function createMockThread() {
       messages.push(content);
       return Promise.resolve();
     }),
+    setArchived: vi.fn(() => Promise.resolve()),
   };
   return { thread, messages };
 }
@@ -225,6 +226,56 @@ describe('createNotifier', () => {
         expect(threadMessages).toHaveLength(2);
       });
       expect(origin.startThread).toHaveBeenCalledTimes(1);
+    });
+
+    it('result 後にスレッドがアーカイブされる', async () => {
+      const { channel } = createMockChannel();
+      const { thread, messages: threadMessages } = createMockThread();
+      const notify = createNotifier(channel);
+
+      notify.setThreadOrigin(createMockOrigin(thread));
+      notify({
+        type: 'progress',
+        event: { kind: 'started' },
+      });
+      await vi.waitFor(() => {
+        expect(threadMessages).toHaveLength(1);
+      });
+
+      notify({ type: 'result', text: '完了' });
+
+      await vi.waitFor(() => {
+        expect(thread.setArchived).toHaveBeenCalledWith(true);
+      });
+    });
+
+    it('error 後にスレッドがアーカイブされる', async () => {
+      const { channel } = createMockChannel();
+      const { thread, messages: threadMessages } = createMockThread();
+      const notify = createNotifier(channel);
+
+      notify.setThreadOrigin(createMockOrigin(thread));
+      notify({
+        type: 'progress',
+        event: { kind: 'started' },
+      });
+      await vi.waitFor(() => {
+        expect(threadMessages).toHaveLength(1);
+      });
+
+      notify({ type: 'error', message: 'failed', exitCode: 1 });
+
+      await vi.waitFor(() => {
+        expect(thread.setArchived).toHaveBeenCalledWith(true);
+      });
+    });
+
+    it('スレッド未作成時の result ではアーカイブしない', () => {
+      const { channel } = createMockChannel();
+      const notify = createNotifier(channel);
+
+      // progress を送らずに result だけ送る（スレッド未作成）
+      expect(() => notify({ type: 'result', text: '完了' })).not.toThrow();
     });
 
     it('result 後の progress では新しいスレッドを作成する', async () => {

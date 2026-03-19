@@ -42,6 +42,7 @@ function createIntegrationContext() {
       threadMessages.push(content);
       return Promise.resolve();
     }),
+    setArchived: vi.fn(() => Promise.resolve()),
   };
   const sender = {
     send: vi.fn((content: string) => {
