@@ -80,20 +80,27 @@ export class Orchestrator {
         if (state === 'initial' || state === 'idle') {
           this.session.reset();
           this.session.restore(command.sessionId);
-          this.notify({ type: 'info', message: 'セッションを再開しました' });
+          this.notify({
+            type: 'info',
+            message: `セッションを再開しました [${this.formatSessionId()}]`,
+          });
         }
         break;
     }
   }
 
+  private formatSessionId(): string {
+    const id = this.session.sessionId;
+    return id ? id.slice(0, 8) : '';
+  }
+
   private formatNewSessionMessage(): string {
     const opts = this.session.options;
-    const parts: string[] = ['新しいセッションを開始しました'];
     const details: string[] = [];
     if (opts.model) details.push(`model: ${opts.model}`);
     if (opts.effort) details.push(`effort: ${opts.effort}`);
-    if (details.length > 0) parts.push(`(${details.join(', ')})`);
-    return parts.join(' ');
+    const suffix = details.length > 0 ? ` (${details.join(', ')})` : '';
+    return `新しいセッションを開始しました [${this.formatSessionId()}]${suffix}`;
   }
 
   onProgress(event: ProgressEvent): void {

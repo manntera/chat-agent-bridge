@@ -269,23 +269,21 @@ async function main(): Promise<void> {
       log(`状態遷移: ${prevState} → ${newState}`);
     }
 
-    // スラッシュコマンドには必ず応答が必要
+    // スラッシュコマンドには必ず応答が必要（通知は orchestrator 経由で別途送信されるため ephemeral で応答）
     if (subcommand === 'new') {
       if (newState === 'idle') {
-        const opts = session.options;
-        const details: string[] = [];
-        if (opts.model) details.push(`model: ${opts.model}`);
-        if (opts.effort) details.push(`effort: ${opts.effort}`);
-        const suffix = details.length > 0 ? ` (${details.join(', ')})` : '';
-        await interaction.reply(`新しいセッションを開始しました${suffix}`);
+        await interaction.reply({ content: '✅', ephemeral: true });
       } else if (newState === 'interrupting') {
-        await interaction.reply('処理を中断して新しいセッションを開始します...');
+        await interaction.reply({
+          content: '処理を中断して新しいセッションを開始します...',
+          ephemeral: true,
+        });
       } else {
         await interaction.reply({ content: '処理中です', ephemeral: true });
       }
     } else if (subcommand === 'interrupt') {
       if (newState === 'interrupting') {
-        await interaction.reply('中断しています...');
+        await interaction.reply({ content: '✅', ephemeral: true });
       } else {
         await interaction.reply({ content: '処理中ではありません', ephemeral: true });
       }

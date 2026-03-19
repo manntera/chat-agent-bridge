@@ -314,7 +314,9 @@ describe('統合テスト: コンポーネント配線', () => {
 
       // /cc new でリセット
       ctx.orchestrator.handleCommand({ type: 'new', options: {} });
-      expect(ctx.sentMessages).toContain('新しいセッションを開始しました');
+      expect(
+        ctx.sentMessages.some((m) => /^新しいセッションを開始しました \[.{8}\]$/.test(m)),
+      ).toBe(true);
 
       // 新しいセッションでメッセージを送信
       ctx.handleMessage(validMessage('新しいタスク'));

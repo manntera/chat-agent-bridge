@@ -115,10 +115,10 @@ describe('createInteractionHandler', () => {
       handler(validInteraction('new'));
 
       expect(notifications).toHaveLength(1);
-      expect(notifications[0]).toEqual({
-        type: 'info',
-        message: '新しいセッションを開始しました',
-      });
+      expect(notifications[0].type).toBe('info');
+      expect((notifications[0] as { type: 'info'; message: string }).message).toMatch(
+        /^新しいセッションを開始しました \[.{8}\]$/,
+      );
     });
 
     it('model と effort オプションが Session に保存される', () => {
@@ -134,10 +134,10 @@ describe('createInteractionHandler', () => {
 
       handler(validInteraction('new', { model: 'opus', effort: 'high' }));
 
-      expect(notifications[0]).toEqual({
-        type: 'info',
-        message: '新しいセッションを開始しました (model: opus, effort: high)',
-      });
+      expect(notifications[0].type).toBe('info');
+      expect((notifications[0] as { type: 'info'; message: string }).message).toMatch(
+        /^新しいセッションを開始しました \[.{8}\] \(model: opus, effort: high\)$/,
+      );
     });
 
     it('不正な effort は無視される', () => {

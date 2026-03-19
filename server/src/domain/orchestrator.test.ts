@@ -143,10 +143,10 @@ describe('Orchestrator', () => {
       expect(orchestrator.state).toBe('idle');
       expect(session.sessionId).not.toBeNull();
       expect(notifications).toHaveLength(1);
-      expect(notifications[0]).toEqual({
-        type: 'info',
-        message: '新しいセッションを開始しました',
-      });
+      expect(notifications[0].type).toBe('info');
+      expect((notifications[0] as { type: 'info'; message: string }).message).toMatch(
+        /^新しいセッションを開始しました \[.{8}\]$/,
+      );
     });
 
     it('InterruptCommand → 何もしない, Initial 維持', () => {
@@ -209,10 +209,10 @@ describe('Orchestrator', () => {
       expect(ctx.session.sessionId).not.toBeNull();
       expect(ctx.session.sessionId).not.toBe(oldSessionId);
       expect(ctx.notifications).toHaveLength(1);
-      expect(ctx.notifications[0]).toEqual({
-        type: 'info',
-        message: '新しいセッションを開始しました',
-      });
+      expect(ctx.notifications[0].type).toBe('info');
+      expect((ctx.notifications[0] as { type: 'info'; message: string }).message).toMatch(
+        /^新しいセッションを開始しました \[.{8}\]$/,
+      );
     });
 
     it('InterruptCommand → 何もしない, Idle 維持', () => {
@@ -392,10 +392,10 @@ describe('Orchestrator', () => {
       expect(ctx.session.sessionId).not.toBeNull();
       expect(ctx.session.sessionId).not.toBe(oldSessionId);
       expect(ctx.notifications).toHaveLength(2);
-      expect(ctx.notifications[0]).toEqual({
-        type: 'info',
-        message: '新しいセッションを開始しました',
-      });
+      expect(ctx.notifications[0].type).toBe('info');
+      expect((ctx.notifications[0] as { type: 'info'; message: string }).message).toMatch(
+        /^新しいセッションを開始しました \[.{8}\]$/,
+      );
       expect(ctx.notifications[1]).toEqual({
         type: 'usage',
         usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
@@ -472,10 +472,10 @@ describe('Orchestrator', () => {
       orchestrator.handleCommand({ type: 'new', options: { model: 'sonnet', effort: 'max' } });
 
       expect(notifications).toHaveLength(1);
-      expect(notifications[0]).toEqual({
-        type: 'info',
-        message: '新しいセッションを開始しました (model: sonnet, effort: max)',
-      });
+      expect(notifications[0].type).toBe('info');
+      expect((notifications[0] as { type: 'info'; message: string }).message).toMatch(
+        /^新しいセッションを開始しました \[.{8}\] \(model: sonnet, effort: max\)$/,
+      );
     });
 
     it('/cc new のオプションが Session に保存される', () => {
@@ -520,10 +520,10 @@ describe('Orchestrator', () => {
 
       expect(ctx.session.options).toEqual({ model: 'sonnet', effort: 'max' });
       expect(ctx.notifications).toHaveLength(2);
-      expect(ctx.notifications[0]).toEqual({
-        type: 'info',
-        message: '新しいセッションを開始しました (model: sonnet, effort: max)',
-      });
+      expect(ctx.notifications[0].type).toBe('info');
+      expect((ctx.notifications[0] as { type: 'info'; message: string }).message).toMatch(
+        /^新しいセッションを開始しました \[.{8}\] \(model: sonnet, effort: max\)$/,
+      );
       expect(ctx.notifications[1]).toEqual({
         type: 'usage',
         usage: { fiveHour: null, sevenDay: null, sevenDaySonnet: null },
@@ -542,7 +542,10 @@ describe('Orchestrator', () => {
       expect(orchestrator.state).toBe('idle');
       expect(session.sessionId).toBe('past-session-id');
       expect(notifications).toHaveLength(1);
-      expect(notifications[0]).toEqual({ type: 'info', message: 'セッションを再開しました' });
+      expect(notifications[0]).toEqual({
+        type: 'info',
+        message: 'セッションを再開しました [past-ses]',
+      });
     });
 
     it('Idle + resume → Idle（セッションが切り替わる）', () => {
