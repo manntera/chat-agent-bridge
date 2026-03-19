@@ -115,6 +115,35 @@ describe('Session', () => {
     });
   });
 
+  describe('restore()', () => {
+    it('指定した sessionId がセットされる', () => {
+      const session = new Session(WORK_DIR);
+      session.restore('existing-session-id');
+      expect(session.sessionId).toBe('existing-session-id');
+    });
+
+    it('isNew は false になる', () => {
+      const session = new Session(WORK_DIR);
+      session.restore('existing-session-id');
+      expect(session.isNew).toBe(false);
+    });
+
+    it('options は空になる', () => {
+      const session = new Session(WORK_DIR);
+      session.restore('existing-session-id');
+      expect(session.options).toEqual({});
+    });
+
+    it('ensure() で作成したセッションを restore() で上書きできる', () => {
+      const session = new Session(WORK_DIR);
+      session.ensure({ model: 'sonnet' });
+      session.restore('different-id');
+      expect(session.sessionId).toBe('different-id');
+      expect(session.isNew).toBe(false);
+      expect(session.options).toEqual({});
+    });
+  });
+
   describe('reset()', () => {
     it('sessionId を null に戻す', () => {
       const session = new Session(WORK_DIR);

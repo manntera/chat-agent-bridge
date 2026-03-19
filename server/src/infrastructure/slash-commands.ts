@@ -30,4 +30,5 @@ export const ccCommand = new SlashCommandBuilder()
           ),
       ),
   )
-  .addSubcommand((sub) => sub.setName('interrupt').setDescription('処理を中断します'));
+  .addSubcommand((sub) => sub.setName('interrupt').setDescription('処理を中断します'))
+  .addSubcommand((sub) => sub.setName('resume').setDescription('過去のセッションを再開します'));

@@ -1,5 +1,12 @@
 import 'dotenv/config';
-import { Client, Events, GatewayIntentBits, TextChannel } from 'discord.js';
+import {
+  ActionRowBuilder,
+  Client,
+  Events,
+  GatewayIntentBits,
+  StringSelectMenuBuilder,
+  TextChannel,
+} from 'discord.js';
 import { createMessageHandler } from './app/message-handler.js';
 import { createInteractionHandler } from './app/interaction-handler.js';
 import { AccessControl } from './domain/access-control.js';
@@ -9,8 +16,21 @@ import type { Notification, ProgressEvent } from './domain/types.js';
 import { ClaudeProcess } from './infrastructure/claude-process.js';
 import { loadConfig } from './infrastructure/config.js';
 import { createNotifier } from './infrastructure/discord-notifier.js';
+import { SessionStore } from './infrastructure/session-store.js';
 import { ccCommand } from './infrastructure/slash-commands.js';
 import { UsageFetcher } from './infrastructure/usage-fetcher.js';
+
+function formatRelativeDate(date: Date): string {
+  const diffMs = Date.now() - date.getTime();
+  const diffMin = Math.floor(diffMs / 60_000);
+  if (diffMin < 1) return 'たった今';
+  if (diffMin < 60) return `${diffMin}分前`;
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return `${diffHour}時間前`;
+  const diffDay = Math.floor(diffHour / 24);
+  if (diffDay < 30) return `${diffDay}日前`;
+  return date.toLocaleDateString('ja-JP');
+}
 
 function log(message: string): void {
   const time = new Date().toLocaleTimeString('ja-JP', { hour12: false });
@@ -98,6 +118,7 @@ async function main(): Promise<void> {
   );
 
   const usageFetcher = new UsageFetcher();
+  const sessionStore = new SessionStore();
   const orchestrator = new Orchestrator(session, claudeProcess, notifier, usageFetcher);
 
   onProgress = (event) => orchestrator.onProgress(event);
@@ -137,11 +158,101 @@ async function main(): Promise<void> {
 
   // スラッシュコマンドイベント
   client.on(Events.InteractionCreate, async (interaction) => {
+    // StringSelectMenu の選択イベント
+    if (interaction.isStringSelectMenu() && interaction.customId === 'cc_resume_select') {
+      const selectedSessionId = interaction.values[0];
+      log(`セッション選択: ${interaction.user.username} ${selectedSessionId.slice(0, 8)}...`);
+
+      const currentState = orchestrator.state;
+      if (currentState === 'busy' || currentState === 'interrupting') {
+        await interaction.update({
+          content: '処理中のため再開できませんでした',
+          components: [],
+        });
+        return;
+      }
+
+      orchestrator.handleCommand({ type: 'resume', sessionId: selectedSessionId });
+      log(`状態遷移: ${currentState} → ${orchestrator.state}`);
+
+      await interaction.update({
+        content: `セッション \`${selectedSessionId.slice(0, 8)}...\` を再開しました。メッセージを送信してください。`,
+        components: [],
+      });
+      return;
+    }
+
     if (!interaction.isChatInputCommand()) return;
     if (interaction.commandName !== 'cc') return;
 
     const subcommand = interaction.options.getSubcommand();
     log(`コマンド受信: ${interaction.user.username} /cc ${subcommand}`);
+
+    // /cc resume は非同期フローのため別処理
+    if (subcommand === 'resume') {
+      if (
+        !accessControl.check({
+          authorBot: false,
+          authorId: interaction.user.id,
+          channelId: interaction.channelId,
+        })
+      ) {
+        await interaction.reply({ content: '権限がありません', ephemeral: true });
+        return;
+      }
+
+      const currentState = orchestrator.state;
+      if (currentState === 'busy' || currentState === 'interrupting') {
+        await interaction.reply({ content: '処理中です', ephemeral: true });
+        return;
+      }
+
+      await interaction.deferReply({ ephemeral: true });
+
+      try {
+        const sessions = await sessionStore.listSessions(config.workDir);
+        if (sessions.length === 0) {
+          await interaction.editReply('再開できるセッションがありません');
+          return;
+        }
+
+        const selectMenu = new StringSelectMenuBuilder()
+          .setCustomId('cc_resume_select')
+          .setPlaceholder('セッションを選択してください')
+          .addOptions(
+            sessions.map((s) => {
+              const cleanMsg = s.firstUserMessage.replace(/\s+/g, ' ').trim();
+              const label = s.slug
+                ? s.slug.length > 100
+                  ? s.slug.slice(0, 97) + '...'
+                  : s.slug
+                : cleanMsg.length > 100
+                  ? cleanMsg.slice(0, 97) + '...'
+                  : cleanMsg || '(空のメッセージ)';
+              const desc = s.slug
+                ? cleanMsg.length > 100
+                  ? cleanMsg.slice(0, 97) + '...'
+                  : cleanMsg
+                : formatRelativeDate(s.lastModified);
+              return {
+                label,
+                description: desc || formatRelativeDate(s.lastModified),
+                value: s.sessionId,
+              };
+            }),
+          );
+
+        const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
+        await interaction.editReply({
+          content: '再開するセッションを選択してください:',
+          components: [row],
+        });
+      } catch (err) {
+        console.error('Resume session list error:', err);
+        await interaction.editReply('セッション一覧の取得に失敗しました');
+      }
+      return;
+    }
 
     const prevState = orchestrator.state;
     handleInteraction({

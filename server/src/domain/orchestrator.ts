@@ -75,6 +75,14 @@ export class Orchestrator {
           this.claudeProcess.interrupt();
         }
         break;
+
+      case 'resume':
+        if (state === 'initial' || state === 'idle') {
+          this.session.reset();
+          this.session.restore(command.sessionId);
+          this.notify({ type: 'info', message: 'セッションを再開しました' });
+        }
+        break;
     }
   }
 

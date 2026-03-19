@@ -10,7 +10,8 @@ export interface SessionOptions {
 export type Command =
   | { type: 'new'; options: SessionOptions }
   | { type: 'interrupt' }
-  | { type: 'prompt'; text: string };
+  | { type: 'prompt'; text: string }
+  | { type: 'resume'; sessionId: string };
 
 export type ProgressEvent =
   | { kind: 'started' }
@@ -34,6 +35,17 @@ export type NotifyFn = (notification: Notification) => void;
 
 export interface IUsageFetcher {
   fetch(): Promise<UsageInfo>;
+}
+
+export interface SessionSummary {
+  sessionId: string;
+  firstUserMessage: string;
+  slug: string | null;
+  lastModified: Date;
+}
+
+export interface ISessionStore {
+  listSessions(workDir: string): Promise<SessionSummary[]>;
 }
 
 export interface IClaudeProcess {

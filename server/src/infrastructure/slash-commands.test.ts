@@ -18,6 +18,11 @@ describe('ccCommand', () => {
     expect(sub).toBeDefined();
   });
 
+  it('サブコマンド "resume" が定義されている', () => {
+    const sub = json.options?.find((o) => o.name === 'resume');
+    expect(sub).toBeDefined();
+  });
+
   it('"new" サブコマンドに model オプションがある（3つの選択肢）', () => {
     const sub = json.options?.find((o) => o.name === 'new') as Record<string, unknown>;
     const options = sub?.options as Array<Record<string, unknown>>;

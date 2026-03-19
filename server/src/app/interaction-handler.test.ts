@@ -185,6 +185,17 @@ describe('createInteractionHandler', () => {
     });
   });
 
+  describe('/cc resume', () => {
+    it('InteractionHandler では処理されない（index.ts で直接ハンドリング）', () => {
+      const { handler, orchestrator, notifications } = createTestContext();
+
+      handler(validInteraction('resume'));
+
+      expect(orchestrator.state).toBe('initial');
+      expect(notifications).toHaveLength(0);
+    });
+  });
+
   describe('未知のサブコマンド', () => {
     it('無視される', () => {
       const { handler, notifications } = createTestContext();

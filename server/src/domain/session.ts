@@ -36,6 +36,12 @@ export class Session {
     return this._sessionId;
   }
 
+  restore(sessionId: string): void {
+    this._sessionId = sessionId;
+    this._isNew = false;
+    this._options = {};
+  }
+
   reset(): void {
     this._sessionId = null;
     this._isNew = false;

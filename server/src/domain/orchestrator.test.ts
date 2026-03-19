@@ -531,6 +531,79 @@ describe('Orchestrator', () => {
     });
   });
 
+  // ----- Resume コマンド -----
+
+  describe('Resume コマンド', () => {
+    it('Initial + resume → Idle（指定した sessionId がセットされる）', () => {
+      const { orchestrator, session, notifications } = createOrchestrator();
+
+      orchestrator.handleCommand({ type: 'resume', sessionId: 'past-session-id' });
+
+      expect(orchestrator.state).toBe('idle');
+      expect(session.sessionId).toBe('past-session-id');
+      expect(notifications).toHaveLength(1);
+      expect(notifications[0]).toEqual({ type: 'info', message: 'セッションを再開しました' });
+    });
+
+    it('Idle + resume → Idle（セッションが切り替わる）', () => {
+      const ctx = createOrchestrator();
+      toIdle(ctx);
+      const oldSessionId = ctx.session.sessionId;
+
+      ctx.orchestrator.handleCommand({ type: 'resume', sessionId: 'another-session-id' });
+
+      expect(ctx.orchestrator.state).toBe('idle');
+      expect(ctx.session.sessionId).toBe('another-session-id');
+      expect(ctx.session.sessionId).not.toBe(oldSessionId);
+    });
+
+    it('Busy + resume → 何もしない（Busy 維持）', () => {
+      const ctx = createOrchestrator();
+      toBusy(ctx);
+
+      ctx.orchestrator.handleCommand({ type: 'resume', sessionId: 'past-session-id' });
+
+      expect(ctx.orchestrator.state).toBe('busy');
+      expect(ctx.notifications).toHaveLength(0);
+    });
+
+    it('Interrupting + resume → 何もしない（Interrupting 維持）', () => {
+      const ctx = createOrchestrator();
+      toInterrupting(ctx, 'interrupt');
+
+      ctx.orchestrator.handleCommand({ type: 'resume', sessionId: 'past-session-id' });
+
+      expect(ctx.orchestrator.state).toBe('interrupting');
+      expect(ctx.notifications).toHaveLength(0);
+    });
+
+    it('resume 後の prompt は resume=true で spawn される', () => {
+      const ctx = createOrchestrator();
+
+      ctx.orchestrator.handleCommand({ type: 'resume', sessionId: 'past-session-id' });
+      ctx.notifications.length = 0;
+
+      ctx.orchestrator.handleMessage('続きをお願い');
+
+      expect(ctx.mockProcess.spawnCalls).toHaveLength(1);
+      expect(ctx.mockProcess.spawnCalls[0]).toEqual({
+        prompt: '続きをお願い',
+        sessionId: 'past-session-id',
+        workDir: WORK_DIR,
+        resume: true,
+        options: {},
+      });
+    });
+
+    it('resume 後に isNew は false', () => {
+      const { orchestrator, session } = createOrchestrator();
+
+      orchestrator.handleCommand({ type: 'resume', sessionId: 'past-session-id' });
+
+      expect(session.isNew).toBe(false);
+    });
+  });
+
   // ----- 複合シナリオ -----
 
   describe('複合シナリオ', () => {
