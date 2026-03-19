@@ -170,6 +170,7 @@ async function main(): Promise<void> {
     }
   });
 
+  await channel.send('claude-discord-bridge を起動しました 🟢');
   log('claude-discord-bridge を起動しました');
 }
 
