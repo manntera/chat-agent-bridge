@@ -28,7 +28,9 @@ function logNotification(notification: Notification): void {
       log(`エラー (exit ${notification.exitCode}): ${notification.message}`);
       break;
     case 'progress':
-      if (notification.event.kind === 'tool_use') {
+      if (notification.event.kind === 'started') {
+        log('途中経過: 📨 受信しました。処理を開始します...');
+      } else if (notification.event.kind === 'tool_use') {
         log(`途中経過: 🔧 ${notification.event.toolName}: ${notification.event.target}`);
       } else {
         log(

@@ -116,6 +116,23 @@ describe('createNotifier', () => {
   // ----- progress 通知（スレッド） -----
 
   describe('progress 通知', () => {
+    it('started イベントを「📨 受信しました」としてスレッドに送信する', async () => {
+      const { channel } = createMockChannel();
+      const { thread, messages: threadMessages } = createMockThread();
+      const notify = createNotifier(channel);
+
+      notify.setThreadOrigin(createMockOrigin(thread));
+      notify({
+        type: 'progress',
+        event: { kind: 'started' },
+      });
+
+      await vi.waitFor(() => {
+        expect(threadMessages).toHaveLength(1);
+      });
+      expect(threadMessages[0]).toBe('📨 受信しました。処理を開始します...');
+    });
+
     it('ツール使用イベントをスレッドに送信する', async () => {
       const { channel } = createMockChannel();
       const { thread, messages: threadMessages } = createMockThread();

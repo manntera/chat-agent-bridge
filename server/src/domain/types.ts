@@ -13,6 +13,7 @@ export type Command =
   | { type: 'prompt'; text: string };
 
 export type ProgressEvent =
+  | { kind: 'started' }
   | { kind: 'tool_use'; toolName: string; target: string }
   | { kind: 'thinking'; text: string };
 

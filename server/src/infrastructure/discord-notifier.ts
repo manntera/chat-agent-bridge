@@ -24,6 +24,9 @@ function splitMessage(text: string, maxLength = 2000): string[] {
 }
 
 function formatProgress(notification: Notification & { type: 'progress' }): string {
+  if (notification.event.kind === 'started') {
+    return '📨 受信しました。処理を開始します...';
+  }
   if (notification.event.kind === 'tool_use') {
     return `🔧 ${notification.event.toolName}: ${notification.event.target}`;
   }

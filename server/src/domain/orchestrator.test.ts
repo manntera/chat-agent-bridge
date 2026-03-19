@@ -383,6 +383,19 @@ describe('Orchestrator', () => {
   // ----- 途中経過の通知 -----
 
   describe('onProgress（途中経過の通知）', () => {
+    it('Idle → Busy 遷移時に started イベントが通知される', () => {
+      const ctx = createOrchestrator();
+      toIdle(ctx);
+
+      ctx.orchestrator.handleMessage('hello');
+
+      expect(ctx.notifications).toHaveLength(1);
+      expect(ctx.notifications[0]).toEqual({
+        type: 'progress',
+        event: { kind: 'started' },
+      });
+    });
+
     it('Busy 中のツール使用イベントが通知される', () => {
       const ctx = createOrchestrator();
       toBusy(ctx);

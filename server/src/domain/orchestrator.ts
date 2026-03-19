@@ -41,6 +41,7 @@ export class Orchestrator {
         } else if (state === 'busy' || state === 'interrupting') {
           this.notify({ type: 'info', message: '処理中です' });
         } else {
+          this.notify({ type: 'progress', event: { kind: 'started' } });
           const sessionId = this.session.sessionId!;
           const resume = !this.session.isNew;
           this.session.markUsed();
