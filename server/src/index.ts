@@ -18,6 +18,7 @@ import type { Notification, ProgressEvent } from './domain/types.js';
 import { ClaudeProcess } from './infrastructure/claude-process.js';
 import { loadConfig } from './infrastructure/config.js';
 import { createNotifier, type ThreadSender } from './infrastructure/discord-notifier.js';
+import { resolvePrompt } from './infrastructure/attachment-resolver.js';
 import { SessionStore } from './infrastructure/session-store.js';
 import { ccCommand } from './infrastructure/slash-commands.js';
 import { UsageFetcher } from './infrastructure/usage-fetcher.js';
@@ -141,7 +142,7 @@ async function main(): Promise<void> {
   const handleMessage = createMessageHandler(accessControl, sessionManager);
 
   // メッセージイベント（スレッド内のプロンプト）
-  client.on(Events.MessageCreate, (msg) => {
+  client.on(Events.MessageCreate, async (msg) => {
     if (msg.author.bot) return;
 
     if (
@@ -154,7 +155,27 @@ async function main(): Promise<void> {
     const parentChannelId = msg.channel.parentId;
     if (!parentChannelId) return;
 
-    log(`メッセージ受信: ${msg.author.username} "${msg.content}" (thread: ${msg.channelId})`);
+    // 添付テキストファイルの解決
+    const attachments = [...msg.attachments.values()].map((a) => ({
+      contentType: a.contentType,
+      name: a.name,
+      size: a.size,
+      url: a.url,
+    }));
+    const { prompt, error } = await resolvePrompt(msg.content, attachments);
+
+    if (error) {
+      const ctx = sessionManager.get(msg.channelId);
+      if (ctx) {
+        msg.channel.send(error).catch((err) => console.error('Discord send error:', err));
+      }
+    }
+
+    if (prompt === null) return;
+
+    log(
+      `メッセージ受信: ${msg.author.username} "${prompt.slice(0, 100)}${prompt.length > 100 ? '...' : ''}" (thread: ${msg.channelId})`,
+    );
 
     const ctx = sessionManager.get(msg.channelId);
     const prevState = ctx?.orchestrator.state;
@@ -164,7 +185,7 @@ async function main(): Promise<void> {
       authorId: msg.author.id,
       channelId: parentChannelId,
       threadId: msg.channelId,
-      content: msg.content,
+      content: prompt,
     });
 
     const newState = ctx?.orchestrator.state;
