@@ -128,6 +128,34 @@ export type INotifier = NotifyFn;
 
 既に `domain/types.ts` に `NotifyFn` が定義されており、`Notification` 型がプラットフォーム非依存であるため、このポートは薄いエイリアスとなる。現在の `discord-notifier.ts` の `createNotifier` がこのポートの Discord 実装に相当する。
 
+**Notifier 生成のファクトリパターン：**
+
+各 Adapter は、スレッド（またはチャンネル）ごとに `NotifyFn` を生成するファクトリ関数を提供する。このファクトリはプラットフォーム固有の送信先オブジェクトを受け取るため、ポートとしては定義せず、各 Adapter 内に閉じる。
+
+```typescript
+// adapters/discord/notifier.ts — ファクトリの例
+import type { NotifyFn } from '../../domain/types.js';
+
+export type ThreadSender = { send(options: unknown): Promise<unknown> };
+
+/** Discord スレッドに対する NotifyFn を生成する */
+export function createNotifier(thread: ThreadSender): NotifyFn {
+  // Embed 形式で通知を送信する実装
+}
+```
+
+```typescript
+// adapters/slack/notifier.ts — ファクトリの例
+import type { NotifyFn } from '../../domain/types.js';
+
+/** Slack スレッドに対する NotifyFn を生成する */
+export function createNotifier(client: WebClient, channelId: string, threadTs: string): NotifyFn {
+  // Block Kit 形式で通知を送信する実装
+}
+```
+
+ファクトリの呼び出しは各 Adapter の `client.ts` 内（セッション生成時）で行う。Composition Root はファクトリの存在を知る必要がない。
+
 ### 3.2 IPlatformClient — Bot クライアントポート
 
 ```typescript
@@ -144,15 +172,16 @@ export interface IPlatformClient {
 
 各プラットフォームの Client 初期化・イベント登録・シャットダウンを抽象化する。`index.ts` はこのインターフェースを通じて Bot を起動するだけになる。
 
-### 3.3 ISystemPromptProvider — システムプロンプトポート
+### 3.3 SystemPromptProvider — システムプロンプトポート
 
 ```typescript
 // app/ports/system-prompt.ts
 
-export interface ISystemPromptProvider {
-  /** プラットフォームのマークダウン制約を含むシステムプロンプトを返す */
-  getSystemPrompt(): string;
-}
+/**
+ * プラットフォームのマークダウン制約を含むシステムプロンプトを返す。
+ * プロジェクト内の他のポート（NotifyFn, FetchFn, HandleMessageFn）と同様に関数型で定義する。
+ */
+export type SystemPromptProvider = () => string;
 ```
 
 Discord はテーブル・画像禁止、Slack は mrkdwn 形式など、プラットフォームごとにマークダウンの制約が異なる。`ClaudeProcess` がこのポートを受け取り、`--append-system-prompt` に渡す。
@@ -182,7 +211,7 @@ server/src/
 │   ├── ports/
 │   │   ├── notifier.ts               ← INotifier（通知ポート）
 │   │   ├── bot.ts                    ← IPlatformClient（Bot ポート）
-│   │   └── system-prompt.ts          ← ISystemPromptProvider
+│   │   └── system-prompt.ts          ← SystemPromptProvider
 │   └── use-cases/
 │       ├── handle-message.ts         ← メッセージ受信ユースケース
 │       └── handle-command.ts         ← コマンド処理ユースケース
@@ -264,8 +293,28 @@ main().catch(console.error);
 - Discord.js Client の初期化・接続
 - スラッシュコマンドの登録
 - `MessageCreate` / `InteractionCreate` イベントの購読
-- セッションファクトリ（`createSession`）の構築
 - 各 Controller への委譲
+
+**`createSession` ファクトリの配置について：**
+
+現在 `index.ts` にある `createSession` は `ClaudeProcess`・`Orchestrator`・`Notifier` を組み立てる DI のワイヤリング処理であり、Adapter 層と Infrastructure 層の両方に依存する。これは本質的に **Composition Root** の責務であるため、`index.ts` ではなく `adapters/discord/client.ts` 内に配置する。
+
+理由：
+- `createSession` は Discord 固有の `Notifier`（Embed 形式）を生成するため、プラットフォーム非依存にはできない
+- 各プラットフォームの `client.ts` が自身の Composition Root を兼ねることで、`index.ts` は `createDiscordClient(config)` を呼ぶだけで済む
+- Slack 追加時は `adapters/slack/client.ts` 内に Slack 版の `createSession` を持つ
+
+```typescript
+// adapters/discord/client.ts 内のイメージ
+function createSession(thread: TextChannel, config: Config): SessionContext {
+  const notify = createNotifier(thread);              // Discord Adapter
+  const systemPrompt = discordSystemPrompt;           // Discord Adapter
+  const claudeProcess = new ClaudeProcess(..., systemPrompt); // Infrastructure
+  const session = new Session(config.workDir);        // Domain
+  const orchestrator = new Orchestrator(...);          // Domain
+  return { orchestrator, session, claudeProcess, threadId: thread.id };
+}
+```
 
 ### 5.3 adapters/discord/notifier.ts
 
@@ -304,23 +353,20 @@ main().catch(console.error);
 
 ```typescript
 // adapters/discord/system-prompt.ts
-import type { ISystemPromptProvider } from '../../app/ports/system-prompt.js';
+import type { SystemPromptProvider } from '../../app/ports/system-prompt.js';
 
-export class DiscordSystemPrompt implements ISystemPromptProvider {
-  getSystemPrompt(): string {
-    return `回答のマークダウンはDiscordで表示されます。Discord互換の構文のみ使用してください。
+export const discordSystemPrompt: SystemPromptProvider = () =>
+  `回答のマークダウンはDiscordで表示されます。Discord互換の構文のみ使用してください。
 使用可能: **太字** *斜体* ~~取り消し線~~ ...
 使用禁止: テーブル(| |)、画像(![]()), HTMLタグ...
 テーブルの代わりにリストやコードブロックで情報を整理してください。`;
-  }
-}
 ```
 
 ### 5.8 infrastructure/claude-process.ts
 
 **変更点：**
 - `DISCORD_SYSTEM_PROMPT` をハードコードから外部注入に変更
-- コンストラクタで `ISystemPromptProvider` を受け取る
+- コンストラクタで `SystemPromptProvider` を受け取る
 
 ```typescript
 // 変更前
@@ -340,10 +386,11 @@ export class ClaudeProcess implements IClaudeProcess {
     private readonly claudePath: string,
     private readonly onProgress: ...,
     private readonly onProcessEnd: ...,
-    private readonly systemPromptProvider: ISystemPromptProvider,
+    private readonly systemPromptProvider: SystemPromptProvider,
     private readonly spawnFn: SpawnFn = nodeSpawn,
   ) {}
 }
+// 使用時: this.systemPromptProvider() で文字列を取得
 ```
 
 ### 5.9 app/use-cases/handle-message.ts
@@ -438,12 +485,16 @@ export type Config = DiscordConfig | SlackConfig;
 
 | ファイル | 変更 |
 |---------|------|
-| `claude-process.ts` | `ISystemPromptProvider` を外部注入に変更 |
+| `claude-process.ts` | `SystemPromptProvider` を外部注入に変更 |
 | `session-store.ts` | 変更なし |
 | `usage-fetcher.ts` | 変更なし |
 | `stream-json-parser.ts` | 変更なし |
-| `attachment-resolver.ts` | 変更なし |
+| `attachment-resolver.ts` | 変更なし（後述の注記参照） |
 | `config.ts` | プラットフォーム別設定のサポート |
+
+**`attachment-resolver.ts` について：**
+
+現在の実装は独自の `Attachment` インターフェース（`contentType`, `name`, `size`, `url`）を定義しており、Discord.js の型には依存していない。Slack の添付ファイルも同じフィールドにマッピング可能であるため、Infrastructure 層に残して問題ない。各 Adapter の `message-controller.ts` が、プラットフォーム固有の添付ファイルオブジェクトをこのインターフェースに変換する責務を持つ。
 
 ---
 
@@ -469,17 +520,59 @@ Adapter 実装時の参考として、主要概念の対応を示す。
 
 ### Phase 1: Adapter 層の分離（Discord のみ）
 
-既存の動作を維持しつつ、アーキテクチャを再構成する。
+既存の動作を維持しつつ、アーキテクチャを再構成する。各ステップの完了時にテストを実行し、リグレッションがないことを確認する。
 
-1. `app/ports/` — ポートインターフェースの定義
-2. `app/use-cases/` — 既存の `app/` ファイルを移動・リネーム
-3. `adapters/discord/` — `index.ts` と `infrastructure/` から Discord 固有コードを移動
-4. `infrastructure/claude-process.ts` — システムプロンプトの外部注入化
-5. `infrastructure/config.ts` — 設定構造の整理
-6. `index.ts` — Composition Root の簡素化
-7. テストの移動・修正
+#### Step 1-1: ポート定義と App 層の整理（低リスク）
 
-**Phase 1 完了時の確認：** 既存のすべてのテストが通り、Discord での動作が変わらないこと。
+影響が小さく、既存コードに変更を加えない準備作業。
+
+1. `app/ports/notifier.ts` — `INotifier` ポートの定義
+2. `app/ports/bot.ts` — `IPlatformClient` ポートの定義
+3. `app/ports/system-prompt.ts` — `SystemPromptProvider` 型の定義
+4. `app/use-cases/handle-message.ts` — 既存 `app/message-handler.ts` を移動・リネーム（`DiscordMessage` → `IncomingMessage`）
+5. `app/use-cases/handle-command.ts` — 既存 `app/interaction-handler.ts` を移動・リネーム
+6. 既存テストを `app/use-cases/` 配下に移動
+
+**完了条件：** 全テスト通過。既存の `app/message-handler.ts` 等への参照を更新済み。
+
+#### Step 1-2: Infrastructure 層の Discord 非依存化（中リスク）
+
+`infrastructure/` から Discord 固有の要素を除去する。
+
+1. `infrastructure/claude-process.ts` — `DISCORD_SYSTEM_PROMPT` を削除し、`SystemPromptProvider` を外部注入に変更
+2. `infrastructure/discord-notifier.ts` → `adapters/discord/notifier.ts` に移動
+3. `infrastructure/slash-commands.ts` → `adapters/discord/slash-commands.ts` に移動
+4. `infrastructure/config.ts` — プラットフォーム別設定構造に変更
+5. 既存テストの修正（`claude-process.test.ts` のシステムプロンプト注入対応、移動したファイルのインポート修正）
+
+**完了条件：** 全テスト通過。`infrastructure/` 内に Discord 固有ファイルが残っていないこと。
+
+#### Step 1-3: index.ts からの Controller 抽出（高リスク・段階的に実施）
+
+`index.ts`（約390行）の分割は最もリスクが高いため、以下の順で1ファイルずつ抽出する。
+
+**Step 1-3a: system-prompt.ts の抽出**
+1. `adapters/discord/system-prompt.ts` を作成（`DiscordSystemPrompt` の定義）
+2. `index.ts` から `DISCORD_SYSTEM_PROMPT` への参照を削除（Step 1-2 で `claude-process.ts` からは削除済み）
+
+**Step 1-3b: message-controller.ts の抽出**
+1. `adapters/discord/message-controller.ts` を作成
+2. `index.ts` の `MessageCreate` ハンドラを移動
+3. `index.ts` からは `messageController.handle(message)` を呼ぶだけにする
+4. テスト実行で動作確認
+
+**Step 1-3c: interaction-controller.ts の抽出**
+1. `adapters/discord/interaction-controller.ts` を作成
+2. `index.ts` の `InteractionCreate` ハンドラ（約190行）を移動
+3. テスト実行で動作確認
+
+**Step 1-3d: client.ts への統合と index.ts の簡素化**
+1. `adapters/discord/client.ts` を作成（`IPlatformClient` を実装）
+2. `index.ts` に残っている Discord.js Client 初期化・イベント登録・`createSession` ファクトリを `client.ts` に移動
+3. `index.ts` を Composition Root（約20行）に簡素化
+4. 新規 Adapter 層テストの追加
+
+**Phase 1 完了条件：** 既存のすべてのテストが通り、Discord での動作が変わらないこと。`index.ts` が Composition Root のみになっていること。
 
 ### Phase 2: Slack Adapter の追加
 
@@ -495,24 +588,57 @@ Adapter 実装時の参考として、主要概念の対応を示す。
 
 ## 9. テスト方針
 
-### 9.1 Adapter 層のテスト
+### 9.1 現在のテスト資産の整理
 
-各プラットフォーム Adapter は、プラットフォーム SDK のモックを使ってテストする。
+現在のテストファイル一覧と、移行後の配置先を示す。
 
-- `adapters/discord/notifier.test.ts` — ThreadSender モックで Embed 形式を検証（現在の `discord-notifier.test.ts` を移動）
-- `adapters/discord/interaction-controller.test.ts` — Interaction モックでコマンド処理を検証
-- `adapters/discord/message-controller.test.ts` — Message モックでルーティングを検証
+| 現在のパス | 移行先 | 作業 |
+|-----------|--------|------|
+| `app/message-handler.test.ts` | `app/use-cases/handle-message.test.ts` | 移動・リネーム。`DiscordMessage` → `IncomingMessage` に型名変更 |
+| `app/interaction-handler.test.ts` | `app/use-cases/handle-command.test.ts` | 移動・リネーム |
+| `infrastructure/discord-notifier.test.ts` | `adapters/discord/notifier.test.ts` | 移動。インポートパス修正のみ |
+| `infrastructure/slash-commands.test.ts` | `adapters/discord/slash-commands.test.ts` | 移動。インポートパス修正のみ |
+| `infrastructure/claude-process.test.ts` | そのまま | `SystemPromptProvider` の注入に対応する修正が必要 |
+| `infrastructure/config.test.ts` | そのまま | プラットフォーム別設定構造に対応する修正が必要 |
+| `index.test.ts`（410行） | 分割（後述） | 最も大きな変更が必要 |
+| その他 Domain/Infrastructure テスト | そのまま | 変更なし |
 
-### 9.2 App 層のテスト
+### 9.2 index.test.ts の分割
 
-ユースケースはプラットフォーム非依存のため、シンプルなユニットテストで検証する。
+現在の `index.test.ts`（410行）は統合テストとして以下の describe を含む。
 
-- `app/use-cases/handle-message.test.ts` — 現在の `message-handler.test.ts` を移動
-- `app/use-cases/handle-command.test.ts` — 現在の `interaction-handler.test.ts` を移動
+- 「メッセージ → ClaudeCode → 結果通知」→ コンポーネント配線のテストとして `adapters/discord/client.test.ts` に移動
+- 「途中経過のリアルタイム通知」→ 同上
+- 「アクセス制御」→ `domain/access-control.test.ts` に既存テストがあるため、重複確認の上で統合または削除
+- 「コマンド処理」→ `adapters/discord/interaction-controller.test.ts` に移動
+- 「エラーハンドリング」→ `adapters/discord/client.test.ts` に移動
+- 「並列セッション」→ 同上
 
-### 9.3 Domain 層・Infrastructure 層のテスト
+分割後の `index.test.ts` は削除する（Composition Root は薄いためテスト不要）。
 
-既存のテストをそのまま維持。変更なし（`claude-process.test.ts` のみシステムプロンプト注入の変更に対応）。
+### 9.3 新規作成が必要なテスト
+
+`index.ts` の `InteractionCreate` ハンドラ（約190行）と `MessageCreate` ハンドラは現在ユニットテストが存在しない。Adapter 層への抽出時に以下を新規作成する。
+
+- **`adapters/discord/interaction-controller.test.ts`** — 主要なテストケース：
+  - `/cc new` — スレッド作成と SessionContext 登録の検証
+  - `/cc interrupt` — スレッド内判定、セッション中断呼び出しの検証
+  - `/cc resume` — セッション一覧取得、セレクトメニュー構築の検証
+  - 未知のサブコマンドへのエラー応答
+  - Ephemeral 応答の検証
+
+- **`adapters/discord/message-controller.test.ts`** — 主要なテストケース：
+  - スレッド外メッセージの無視
+  - 親チャンネル ID の正しい取得
+  - 添付ファイルの `Attachment` インターフェースへの変換
+  - App 層 `HandleMessageFn` への正しい委譲
+
+### 9.4 Domain 層・Infrastructure 層のテスト
+
+既存のテストをそのまま維持。以下のみ修正が必要。
+
+- `claude-process.test.ts` — `SystemPromptProvider` の外部注入に対応（テスト内でモック関数を渡す）
+- `config.test.ts` — プラットフォーム別設定構造のテスト追加
 
 ---
 
@@ -524,10 +650,13 @@ Adapter 実装時の参考として、主要概念の対応を示す。
 | Discord と Slack を同時に起動したい | 将来的に対応可能だが、初期実装ではどちらか一方のみ |
 | Slack の Rate Limit | Adapter 内で Bolt.js の組み込みリトライ機構を利用 |
 | プラットフォーム間でセッションを共有したい | セッション ID は ClaudeCode の JSONL に依存するためプラットフォーム非依存。`/cc resume` で別プラットフォームからでも再開可能 |
+| 複数チャンネルで運用したい | 現在は `channelId: string`（単一チャンネル）で、1チャンネル内のスレッドでセッションを管理する設計。複数チャンネル対応が必要になった場合は `channelIds: string[]` への変更と `AccessControl.check()` の修正のみで対応可能（局所的な変更）。初期実装では単一チャンネルを維持する |
 
 ---
 
 ## 11. 変更影響の概要
+
+### 11.1 プロダクションコード
 
 | 区分 | ファイル数 | 内容 |
 |------|-----------|------|
@@ -535,3 +664,13 @@ Adapter 実装時の参考として、主要概念の対応を示す。
 | 移動・リネーム | 4 | `app/` (2: message-handler → use-cases/, interaction-handler → use-cases/), `infrastructure/` (2: discord-notifier → adapters/, slash-commands → adapters/) |
 | 修正 | 3 | `claude-process.ts`（システムプロンプト外部注入）, `config.ts`（設定構造整理）, `index.ts`（Composition Root 簡素化） |
 | 変更なし | 8 | `domain/` 全体 (5), `session-store.ts`, `usage-fetcher.ts`, `stream-json-parser.ts`, `attachment-resolver.ts` |
+
+### 11.2 テストコード
+
+| 区分 | ファイル数 | 内容 |
+|------|-----------|------|
+| 新規作成 | 3 | `adapters/discord/` (interaction-controller.test, message-controller.test, client.test) |
+| 移動・リネーム | 4 | `app/` (2: message-handler.test → use-cases/, interaction-handler.test → use-cases/), `infrastructure/` (2: discord-notifier.test → adapters/, slash-commands.test → adapters/) |
+| 修正 | 2 | `claude-process.test.ts`（SystemPromptProvider 注入対応）, `config.test.ts`（設定構造対応） |
+| 分割・削除 | 1 | `index.test.ts`（410行）→ 各 Adapter テストに分割後、削除 |
+| 変更なし | 6 | `domain/` 全体 (4: access-control, orchestrator, session, session-manager), `session-store.test.ts`, `attachment-resolver.test.ts` |
