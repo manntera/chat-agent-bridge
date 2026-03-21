@@ -56,7 +56,7 @@ function createOrchestrator() {
   return { orchestrator, session, mockProcess, notifications };
 }
 
-/** Initial → Idle（!new でセッション作成） */
+/** Initial → Idle（/cc new でセッション作成） */
 function toIdle(ctx: ReturnType<typeof createOrchestrator>) {
   ctx.orchestrator.handleCommand({ type: 'new', options: {} });
   ctx.notifications.length = 0;
@@ -495,7 +495,7 @@ describe('Orchestrator', () => {
       expect(ctx.mockProcess.spawnCalls[0].options).toEqual({ model: 'sonnet', effort: 'max' });
     });
 
-    it('オプションなしの !new では空オプション', () => {
+    it('オプションなしの /cc new では空オプション', () => {
       const { orchestrator, session } = createOrchestrator();
 
       orchestrator.handleCommand({ type: 'new', options: {} });
@@ -503,14 +503,14 @@ describe('Orchestrator', () => {
       expect(session.options).toEqual({});
     });
 
-    it('Busy 中の !new オプションが中断後の新セッションに引き継がれる', () => {
+    it('Busy 中の /cc new オプションが中断後の新セッションに引き継がれる', () => {
       const ctx = createOrchestrator();
 
       ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       ctx.orchestrator.handleMessage('task');
       ctx.notifications.length = 0;
 
-      // Busy 中に !new --model sonnet
+      // Busy 中に /cc new (model: sonnet)
       ctx.orchestrator.handleCommand({ type: 'new', options: { model: 'sonnet', effort: 'max' } });
       expect(ctx.orchestrator.state).toBe('interrupting');
 
@@ -610,10 +610,10 @@ describe('Orchestrator', () => {
   // ----- 複合シナリオ -----
 
   describe('複合シナリオ', () => {
-    it('完全ライフサイクル: !new → Idle → Busy → Idle → !new → Idle', () => {
+    it('完全ライフサイクル: /cc new → Idle → Busy → Idle → /cc new → Idle', () => {
       const ctx = createOrchestrator();
 
-      // !new → Idle
+      // /cc new → Idle
       ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       expect(ctx.orchestrator.state).toBe('idle');
       const firstSessionId = ctx.session.sessionId;
@@ -637,7 +637,7 @@ describe('Orchestrator', () => {
       ctx.orchestrator.onProcessEnd(0, 'done 2');
       expect(ctx.orchestrator.state).toBe('idle');
 
-      // !new → Idle（新しいセッション）
+      // /cc new → Idle（新しいセッション）
       ctx.orchestrator.handleCommand({ type: 'new', options: {} });
       expect(ctx.orchestrator.state).toBe('idle');
       expect(ctx.session.sessionId).not.toBe(firstSessionId);
@@ -659,7 +659,7 @@ describe('Orchestrator', () => {
       expect(ctx.session.sessionId).not.toBeNull();
     });
 
-    it('Busy 中に !new: Busy → Interrupting → Idle（新セッション）', () => {
+    it('Busy 中に /cc new: Busy → Interrupting → Idle（新セッション）', () => {
       const ctx = createOrchestrator();
 
       toIdle(ctx);
