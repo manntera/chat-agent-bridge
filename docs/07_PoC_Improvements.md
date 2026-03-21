@@ -391,7 +391,7 @@ interface InteractionContext extends MessageContext {
 Bot 起動完了時にチャンネルへメッセージを送信する:
 
 ```typescript
-await channel.send('claude-discord-bridge を起動しました 🟢');
+await channel.send('chat-agent-bridge を起動しました 🟢');
 ```
 
 **変更理由：** Bot が正常に起動しチャンネルに接続されたことを、スマートフォン側から確認できるようにするため。
@@ -413,7 +413,7 @@ await channel.send('claude-discord-bridge を起動しました 🟢');
 [14:32:16] Discord に接続しました
 [14:32:16] スラッシュコマンド /cc を登録しました
 [14:32:16] チャンネル #claude-bridge を取得しました
-[14:32:16] claude-discord-bridge を起動しました
+[14:32:16] chat-agent-bridge を起動しました
 [14:33:01] メッセージ受信: username "テスト追加して"
 [14:33:01] 状態遷移: idle → busy
 [14:33:01] 途中経過: 📨 受信しました。処理を開始します...

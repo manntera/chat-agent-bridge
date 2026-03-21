@@ -1,6 +1,6 @@
 > **注意**: このドキュメントは PoC 時点の使い方ガイドです。テキストコマンド（`!new` 等）はスラッシュコマンド（`/cc new` 等）に置き換えられるなど、現在の実装とは異なる部分があります。最新の使い方は [README.md](../README.md) を参照してください。
 
-# 使い方ガイド：claude-discord-bridge PoC
+# 使い方ガイド：chat-agent-bridge PoC
 
 スマートフォンの Discord から、自宅マシンの ClaudeCode を遠隔操作するための Bot です。
 
@@ -101,7 +101,7 @@ pnpm dev
 
 ```
 Discord に接続しました
-claude-discord-bridge を起動しました
+chat-agent-bridge を起動しました
 ```
 
 ---

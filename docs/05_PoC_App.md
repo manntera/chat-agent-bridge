@@ -1,6 +1,6 @@
 > **注意**: このドキュメントは PoC 設計時に作成されたものです。テキストコマンド（`!new` 等）はスラッシュコマンド（`/cc new` 等）に置き換えられるなど、現在の実装とは異なる部分があります。最新の使い方は [README.md](../README.md) を参照してください。
 
-# App層の設計：claude-discord-bridge PoC
+# App層の設計：chat-agent-bridge PoC
 
 **スコープ: PoC（概念実証）範囲のみ**
 

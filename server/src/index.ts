@@ -385,8 +385,8 @@ async function main(): Promise<void> {
     }
   });
 
-  await channel.send('claude-discord-bridge を起動しました 🟢');
-  log('claude-discord-bridge を起動しました');
+  await channel.send('chat-agent-bridge を起動しました 🟢');
+  log('chat-agent-bridge を起動しました');
 }
 
 main().catch(console.error);

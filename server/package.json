@@ -1,5 +1,5 @@
 {
-  "name": "claude-discord-bridge",
+  "name": "chat-agent-bridge",
   "version": "1.0.0",
   "description": "Discord Bot bridge for remote ClaudeCode operation",
   "type": "module",

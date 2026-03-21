@@ -2,7 +2,7 @@
 
 # 設計レポート：スマートフォンから ClaudeCode を遠隔操作するシステム
 
-**プロジェクト名: `claude-discord-bridge`**
+**プロジェクト名: `chat-agent-bridge`**
 
 **Discord Forum × ClaudeCode Bridge**
 

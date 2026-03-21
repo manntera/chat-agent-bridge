@@ -1,8 +1,8 @@
 > **注意**: このドキュメントは PoC 計画時に作成されたものです。テキストコマンド（`!new` 等）はスラッシュコマンド（`/cc new` 等）に置き換えられるなど、現在の実装とは異なる部分があります。最新の使い方は [README.md](../README.md) を参照してください。
 
-# PoC（概念実証）計画：claude-discord-bridge
+# PoC（概念実証）計画：chat-agent-bridge
 
-**プロジェクト名: `claude-discord-bridge`**
+**プロジェクト名: `chat-agent-bridge`**
 
 **本ドキュメントは PoC 範囲の計画を定義する。システム全体の設計は `01_SystemDesign.md` を参照。**
 
