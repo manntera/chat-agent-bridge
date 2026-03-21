@@ -205,6 +205,7 @@ async function main(): Promise<void> {
         // スレッドを作成してセッションを登録
         const thread = await channel.threads.create({
           name: `Session: ${selectedSessionId.slice(0, 8)}... (再開)`,
+          autoArchiveDuration: 60,
         });
 
         const ctx = createSession(thread.id, thread);
@@ -277,7 +278,7 @@ async function main(): Promise<void> {
         const suffix = details.length > 0 ? ` (${details.join(', ')})` : '';
         const threadName = `Session: ${sessionId.slice(0, 8)}${suffix}`;
 
-        const thread = await channel.threads.create({ name: threadName });
+        const thread = await channel.threads.create({ name: threadName, autoArchiveDuration: 60 });
         const ctx = createSession(thread.id, thread);
         // createSession 内で新しい Session を作るが、options を引き継ぐために上書き
         ctx.session.reset();
