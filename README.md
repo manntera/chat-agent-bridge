@@ -119,7 +119,7 @@ Claude Code CLI (claude -p --session-id ...)
 ローカルファイルシステム
 ```
 
-Clean Architecture に基づくレイヤー構成で実装されています。詳細は [docs/](docs/) を参照してください。
+domain / app / infrastructure のレイヤーに分離して実装されています。詳細は [docs/](docs/) を参照してください。
 
 ## ライセンス
 
