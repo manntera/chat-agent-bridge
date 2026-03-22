@@ -4,6 +4,7 @@ export interface Config {
   allowedUserIds: string[];
   workDir: string;
   claudePath: string;
+  geminiApiKey: string | null;
 }
 
 function requireEnv(name: string): string {
@@ -23,5 +24,6 @@ export function loadConfig(): Config {
       .map((id) => id.trim()),
     workDir: requireEnv('WORK_DIR'),
     claudePath: process.env.CLAUDE_PATH || 'claude',
+    geminiApiKey: process.env.GEMINI_API_KEY || null,
   };
 }

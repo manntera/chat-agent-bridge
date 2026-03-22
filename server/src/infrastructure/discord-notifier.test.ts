@@ -18,6 +18,7 @@ function createMockThread() {
       sent.push({ type, content });
       return Promise.resolve();
     }),
+    setName: vi.fn(() => Promise.resolve()),
   };
   return { thread, sent };
 }
@@ -273,6 +274,7 @@ describe('createNotifier', () => {
     it('send が失敗してもエラーを投げない', () => {
       const thread: ThreadSender = {
         send: vi.fn(() => Promise.reject(new Error('network error'))),
+        setName: vi.fn(() => Promise.resolve()),
       };
       const notify = createNotifier(thread);
 

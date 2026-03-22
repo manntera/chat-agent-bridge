@@ -21,6 +21,7 @@ import { createNotifier, type ThreadSender } from './infrastructure/discord-noti
 import { resolvePrompt } from './infrastructure/attachment-resolver.js';
 import { SessionStore } from './infrastructure/session-store.js';
 import { ccCommand } from './infrastructure/slash-commands.js';
+import { TitleGenerator } from './infrastructure/title-generator.js';
 import { UsageFetcher } from './infrastructure/usage-fetcher.js';
 
 function formatRelativeDate(date: Date): string {
@@ -105,6 +106,7 @@ async function main(): Promise<void> {
   const sessionManager = new SessionManager();
   const sessionStore = new SessionStore();
   const usageFetcher = new UsageFetcher();
+  const titleGenerator = config.geminiApiKey ? new TitleGenerator(config.geminiApiKey) : null;
 
   /** セッションコンテキストを作成し SessionManager に登録する */
   function createSession(threadId: string, thread: ThreadSender): SessionContext {
@@ -131,6 +133,21 @@ async function main(): Promise<void> {
     onProcessEnd = (exitCode, output) => {
       log(`ClaudeProcess 終了 (exitCode: ${exitCode}, thread: ${threadId})`);
       orchestrator.onProcessEnd(exitCode, output);
+
+      // タイトル生成（非同期・失敗しても無視）
+      if (titleGenerator && session.sessionId) {
+        titleGenerator
+          .generate(session.sessionId, config.workDir)
+          .then((title) => {
+            if (title) {
+              log(`タイトル生成: "${title}" (thread: ${threadId})`);
+              thread
+                .setName(title)
+                .catch((err: unknown) => console.error('Thread setName error:', err));
+            }
+          })
+          .catch((err) => console.error('Title generation error:', err));
+      }
     };
 
     const ctx: SessionContext = { orchestrator, session, claudeProcess, threadId };

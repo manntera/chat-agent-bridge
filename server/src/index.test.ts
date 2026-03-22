@@ -54,6 +54,7 @@ function createIntegrationContext() {
       sent.push({ type, content });
       return Promise.resolve();
     }),
+    setName: vi.fn(() => Promise.resolve()),
   };
 
   const spawnedProcesses: MockChildProcess[] = [];
@@ -364,6 +365,7 @@ describe('統合テスト: コンポーネント配線', () => {
           sent2.push({ type: typeof content === 'string' ? 'text' : 'embed', content });
           return Promise.resolve();
         }),
+        setName: vi.fn(() => Promise.resolve()),
       };
 
       const session2 = new Session(CONFIG.workDir);

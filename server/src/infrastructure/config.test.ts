@@ -33,6 +33,7 @@ describe('loadConfig', () => {
         allowedUserIds: ['111', '222', '333'],
         workDir: '/home/user/projects',
         claudePath: 'claude',
+        geminiApiKey: null,
       });
     });
 

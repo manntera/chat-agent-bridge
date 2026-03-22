@@ -13,6 +13,7 @@ export interface SendOptions {
 
 export interface ThreadSender {
   send(content: string | SendOptions): Promise<unknown>;
+  setName(name: string): Promise<unknown>;
 }
 
 function splitMessage(text: string, maxLength = 2000): string[] {
