@@ -1,18 +1,20 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdtemp, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { formatForTitleGeneration, type ConversationEntry } from './session-reader.js';
-
-// readSession は projectDir(workDir) からパスを算出するため、
-// テスト用に直接ファイルを作って読み込むラッパーを用意する
-import { createReadStream } from 'node:fs';
-import { createInterface } from 'node:readline';
 
 let tempDir: string;
 
+// session-store.js の projectDir をモック
+vi.mock('./session-store.js', () => ({
+  projectDir: (...args: unknown[]) => mockProjectDir(...args),
+}));
+
+let mockProjectDir: (...args: unknown[]) => string;
+
 beforeEach(async () => {
   tempDir = await mkdtemp(join(tmpdir(), 'session-reader-test-'));
+  mockProjectDir = () => tempDir;
 });
 
 afterEach(async () => {
@@ -37,54 +39,19 @@ function snapshotLine(): string {
   return JSON.stringify({ type: 'file-history-snapshot', snapshot: {} });
 }
 
-// readSession は projectDir を使うため、直接ファイルから読むヘルパーを作成
-async function readSessionFromFile(filePath: string): Promise<ConversationEntry[]> {
-  const entries: ConversationEntry[] = [];
-  const rl = createInterface({ input: createReadStream(filePath) });
-  try {
-    for await (const line of rl) {
-      try {
-        const parsed = JSON.parse(line);
-        if (parsed.type === 'user' && parsed.message?.content) {
-          const text = extractTextForTest(parsed.message.content);
-          if (text) entries.push({ role: 'user', text });
-        } else if (parsed.type === 'assistant' && parsed.message?.content) {
-          const text = extractTextForTest(parsed.message.content);
-          if (text) entries.push({ role: 'assistant', text });
-        }
-      } catch {
-        // skip
-      }
-    }
-  } finally {
-    rl.close();
+describe('readSession', () => {
+  // 動的インポートして vi.mock のホイスティングを確実にする
+  async function importReadSession() {
+    const mod = await import('./session-reader.js');
+    return mod.readSession;
   }
-  return entries;
-}
 
-function extractTextForTest(content: unknown): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    const parts: string[] = [];
-    for (const item of content as Record<string, unknown>[]) {
-      if (item?.type === 'text' && typeof item.text === 'string') {
-        parts.push(item.text as string);
-      } else if (item?.type === 'tool_use' && typeof item.name === 'string') {
-        parts.push(`[tool_use: ${item.name}]`);
-      }
-    }
-    return parts.join(' ');
-  }
-  return '';
-}
-
-describe('readSession (via file helper)', () => {
   it('ユーザーとアシスタントのメッセージを抽出する', async () => {
-    const filePath = join(tempDir, 'test.jsonl');
+    const readSession = await importReadSession();
     const lines = [userLine('こんにちは'), assistantLine([{ type: 'text', text: '応答です' }])];
-    await writeFile(filePath, lines.join('\n'));
+    await writeFile(join(tempDir, 'test-session.jsonl'), lines.join('\n'));
 
-    const entries = await readSessionFromFile(filePath);
+    const entries = await readSession('test-session', '/work');
 
     expect(entries).toEqual([
       { role: 'user', text: 'こんにちは' },
@@ -93,58 +60,112 @@ describe('readSession (via file helper)', () => {
   });
 
   it('tool_use はツール名のみ含まれる', async () => {
-    const filePath = join(tempDir, 'test.jsonl');
+    const readSession = await importReadSession();
     const lines = [
       assistantLine([
         { type: 'text', text: 'ファイルを編集します' },
         { type: 'tool_use', name: 'Edit', id: '123', input: { path: '/foo' } },
       ]),
     ];
-    await writeFile(filePath, lines.join('\n'));
+    await writeFile(join(tempDir, 'test-session.jsonl'), lines.join('\n'));
 
-    const entries = await readSessionFromFile(filePath);
+    const entries = await readSession('test-session', '/work');
 
     expect(entries).toHaveLength(1);
     expect(entries[0].text).toBe('ファイルを編集します [tool_use: Edit]');
   });
 
   it('snapshot 行などは無視される', async () => {
-    const filePath = join(tempDir, 'test.jsonl');
+    const readSession = await importReadSession();
     const lines = [snapshotLine(), userLine('メッセージ')];
-    await writeFile(filePath, lines.join('\n'));
+    await writeFile(join(tempDir, 'test-session.jsonl'), lines.join('\n'));
 
-    const entries = await readSessionFromFile(filePath);
+    const entries = await readSession('test-session', '/work');
 
     expect(entries).toHaveLength(1);
     expect(entries[0].role).toBe('user');
   });
 
   it('壊れた JSON 行はスキップされる', async () => {
-    const filePath = join(tempDir, 'test.jsonl');
+    const readSession = await importReadSession();
     const lines = ['not valid json', userLine('有効')];
-    await writeFile(filePath, lines.join('\n'));
+    await writeFile(join(tempDir, 'test-session.jsonl'), lines.join('\n'));
 
-    const entries = await readSessionFromFile(filePath);
+    const entries = await readSession('test-session', '/work');
 
     expect(entries).toHaveLength(1);
     expect(entries[0].text).toBe('有効');
   });
 
   it('空ファイルは空配列を返す', async () => {
-    const filePath = join(tempDir, 'test.jsonl');
-    await writeFile(filePath, '');
+    const readSession = await importReadSession();
+    await writeFile(join(tempDir, 'test-session.jsonl'), '');
 
-    const entries = await readSessionFromFile(filePath);
+    const entries = await readSession('test-session', '/work');
 
     expect(entries).toEqual([]);
+  });
+
+  it('配列 content のテキストを結合する', async () => {
+    const readSession = await importReadSession();
+    const lines = [
+      userLine([
+        { type: 'text', text: 'パート1' },
+        { type: 'text', text: 'パート2' },
+      ]),
+    ];
+    await writeFile(join(tempDir, 'test-session.jsonl'), lines.join('\n'));
+
+    const entries = await readSession('test-session', '/work');
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].text).toBe('パート1 パート2');
+  });
+
+  it('content が非文字列・非配列の場合はスキップされる', async () => {
+    const readSession = await importReadSession();
+    const lines = [
+      JSON.stringify({
+        type: 'user',
+        message: { role: 'user', content: 12345 },
+      }),
+    ];
+    await writeFile(join(tempDir, 'test-session.jsonl'), lines.join('\n'));
+
+    const entries = await readSession('test-session', '/work');
+
+    expect(entries).toEqual([]);
+  });
+
+  it('text でも tool_use でもない配列要素はスキップされる', async () => {
+    const readSession = await importReadSession();
+    const lines = [
+      assistantLine([
+        { type: 'image', url: 'http://example.com' },
+        { type: 'text', text: 'テキスト' },
+      ]),
+    ];
+    await writeFile(join(tempDir, 'test-session.jsonl'), lines.join('\n'));
+
+    const entries = await readSession('test-session', '/work');
+
+    expect(entries).toHaveLength(1);
+    expect(entries[0].text).toBe('テキスト');
   });
 });
 
 describe('formatForTitleGeneration', () => {
-  it('会話をフォーマットする', () => {
-    const entries: ConversationEntry[] = [
-      { role: 'user', text: 'バグを直して' },
-      { role: 'assistant', text: '修正しました' },
+  // formatForTitleGeneration は session-store に依存しないので直接インポート可能
+  async function importFormat() {
+    const mod = await import('./session-reader.js');
+    return mod.formatForTitleGeneration;
+  }
+
+  it('会話をフォーマットする', async () => {
+    const formatForTitleGeneration = await importFormat();
+    const entries = [
+      { role: 'user' as const, text: 'バグを直して' },
+      { role: 'assistant' as const, text: '修正しました' },
     ];
 
     const result = formatForTitleGeneration(entries, 10000);
@@ -152,24 +173,23 @@ describe('formatForTitleGeneration', () => {
     expect(result).toBe('user: バグを直して\nassistant: 修正しました');
   });
 
-  it('maxLength 以内ならそのまま返す', () => {
-    const entries: ConversationEntry[] = [{ role: 'user', text: 'hello' }];
+  it('maxLength 以内ならそのまま返す', async () => {
+    const formatForTitleGeneration = await importFormat();
+    const entries = [{ role: 'user' as const, text: 'hello' }];
 
     const result = formatForTitleGeneration(entries, 100);
 
     expect(result).toBe('user: hello');
   });
 
-  it('maxLength 超過時は末尾（最新）を優先する', () => {
-    const entries: ConversationEntry[] = [
-      { role: 'user', text: 'A'.repeat(50) },
-      { role: 'assistant', text: 'B'.repeat(50) },
-      { role: 'user', text: 'C'.repeat(20) },
+  it('maxLength 超過時は末尾（最新）を優先する', async () => {
+    const formatForTitleGeneration = await importFormat();
+    const entries = [
+      { role: 'user' as const, text: 'A'.repeat(50) },
+      { role: 'assistant' as const, text: 'B'.repeat(50) },
+      { role: 'user' as const, text: 'C'.repeat(20) },
     ];
 
-    // "user: " + A*50 = 56, "assistant: " + B*50 = 61, "user: " + C*20 = 26
-    // 全体 = 56 + 1 + 61 + 1 + 26 = 145
-    // maxLength を 90 にすると最新の2行(61 + 1 + 26 = 88)が入る
     const result = formatForTitleGeneration(entries, 90);
 
     expect(result).toContain('B'.repeat(50));
@@ -177,8 +197,18 @@ describe('formatForTitleGeneration', () => {
     expect(result).not.toContain('A'.repeat(50));
   });
 
-  it('空配列は空文字を返す', () => {
+  it('空配列は空文字を返す', async () => {
+    const formatForTitleGeneration = await importFormat();
     const result = formatForTitleGeneration([], 100);
+
+    expect(result).toBe('');
+  });
+
+  it('全ての行が maxLength を超える場合は空文字を返す', async () => {
+    const formatForTitleGeneration = await importFormat();
+    const entries = [{ role: 'user' as const, text: 'A'.repeat(100) }];
+
+    const result = formatForTitleGeneration(entries, 5);
 
     expect(result).toBe('');
   });

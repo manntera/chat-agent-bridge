@@ -97,6 +97,26 @@ describe('toCommand', () => {
     const cmd = toCommand(validInteraction('new', { effort: 'invalid' }));
     expect(cmd).toEqual({ type: 'new', options: {} });
   });
+
+  it('model のみ指定時は model のみ含まれる', () => {
+    const cmd = toCommand(validInteraction('new', { model: 'sonnet' }));
+    expect(cmd).toEqual({ type: 'new', options: { model: 'sonnet' } });
+  });
+
+  it('effort のみ指定時は effort のみ含まれる', () => {
+    const cmd = toCommand(validInteraction('new', { effort: 'high' }));
+    expect(cmd).toEqual({ type: 'new', options: { effort: 'high' } });
+  });
+
+  it('report → null（index.ts で処理）', () => {
+    const cmd = toCommand(validInteraction('report'));
+    expect(cmd).toBeNull();
+  });
+
+  it('オプションなしの new → 空の options', () => {
+    const cmd = toCommand(validInteraction('new'));
+    expect(cmd).toEqual({ type: 'new', options: {} });
+  });
 });
 
 describe('createInteractionHandler', () => {
@@ -147,6 +167,18 @@ describe('createInteractionHandler', () => {
     });
   });
 
+  describe('/cc resume', () => {
+    it('resume コマンドは handler で何もしない', () => {
+      const { handler, registerSession } = createTestContext();
+      const { mockProcess } = registerSession('thread-1');
+
+      // resume は toCommand で null を返す → handler は早期リターン
+      handler(validInteraction('resume', { threadId: 'thread-1' }));
+
+      expect(mockProcess.interruptCalls).toBe(0);
+    });
+  });
+
   describe('/cc new', () => {
     it('InteractionHandler では処理されない（index.ts で処理）', () => {
       const { handler, sessionManager } = createTestContext();
@@ -154,6 +186,16 @@ describe('createInteractionHandler', () => {
       handler(validInteraction('new', { threadId: null }));
 
       expect(sessionManager.size()).toBe(0);
+    });
+
+    it('new コマンドは interrupt ロジックに入らない', () => {
+      const { handler, registerSession } = createTestContext();
+      const { mockProcess } = registerSession('thread-1');
+
+      // new コマンドは handler 内で interrupt しない
+      handler(validInteraction('new', { threadId: 'thread-1' }));
+
+      expect(mockProcess.interruptCalls).toBe(0);
     });
   });
 });

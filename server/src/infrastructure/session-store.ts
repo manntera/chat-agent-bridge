@@ -72,9 +72,17 @@ export function getDayBoundary(date: Date): { from: Date; to: Date } {
   return { from: new Date(fromUtc), to: new Date(toUtc) };
 }
 
+export type ProjectDirFn = (workDir: string) => string;
+
 export class SessionStore implements ISessionStore {
+  private readonly projectDirFn: ProjectDirFn;
+
+  constructor(projectDirFn: ProjectDirFn = projectDir) {
+    this.projectDirFn = projectDirFn;
+  }
+
   private async allSessions(workDir: string): Promise<SessionSummary[]> {
-    const dir = projectDir(workDir);
+    const dir = this.projectDirFn(workDir);
     const entries = await readdir(dir).catch(() => []);
     const jsonlFiles = entries.filter((e) => e.endsWith('.jsonl'));
 

@@ -107,6 +107,39 @@ describe('parseStreamJsonLine', () => {
       });
     });
 
+    it('Bash ツール → command が文字列でない場合はツール名を target にする', () => {
+      const line = assistantEvent([
+        { type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 123 } },
+      ]);
+
+      expect(parseStreamJsonLine(line)).toEqual({
+        kind: 'progress',
+        event: { kind: 'tool_use', toolName: 'Bash', target: 'Bash' },
+      });
+    });
+
+    it('Edit ツール → file_path が文字列でない場合はツール名を target にする', () => {
+      const line = assistantEvent([
+        { type: 'tool_use', id: 'toolu_1', name: 'Edit', input: { file_path: 123 } },
+      ]);
+
+      expect(parseStreamJsonLine(line)).toEqual({
+        kind: 'progress',
+        event: { kind: 'tool_use', toolName: 'Edit', target: 'Edit' },
+      });
+    });
+
+    it('Glob ツール → pattern が文字列でない場合はツール名を target にする', () => {
+      const line = assistantEvent([
+        { type: 'tool_use', id: 'toolu_1', name: 'Glob', input: { pattern: null } },
+      ]);
+
+      expect(parseStreamJsonLine(line)).toEqual({
+        kind: 'progress',
+        event: { kind: 'tool_use', toolName: 'Glob', target: 'Glob' },
+      });
+    });
+
     it('未知のツール → ツール名をそのまま target にする', () => {
       const line = assistantEvent([
         { type: 'tool_use', id: 'toolu_1', name: 'Agent', input: { some_field: 'value' } },
@@ -157,6 +190,18 @@ describe('parseStreamJsonLine', () => {
       });
     });
 
+    it('result が非文字列 → 空文字列の result', () => {
+      const line = JSON.stringify({
+        type: 'result',
+        result: { complex: 'object' },
+      });
+
+      expect(parseStreamJsonLine(line)).toEqual({
+        kind: 'result',
+        text: '',
+      });
+    });
+
     it('result が空文字列 → 空文字列の result', () => {
       const line = JSON.stringify({
         type: 'result',
@@ -195,6 +240,28 @@ describe('parseStreamJsonLine', () => {
     it('未知の type → ignored', () => {
       const line = JSON.stringify({ type: 'unknown', data: 'something' });
       expect(parseStreamJsonLine(line)).toEqual({ kind: 'ignored' });
+    });
+
+    it('assistant だが message がない → ignored', () => {
+      const line = JSON.stringify({ type: 'assistant' });
+      expect(parseStreamJsonLine(line)).toEqual({ kind: 'ignored' });
+    });
+
+    it('assistant の message.content が undefined → ignored', () => {
+      const line = JSON.stringify({
+        type: 'assistant',
+        message: { model: 'test', id: 'msg', type: 'message', role: 'assistant' },
+      });
+      expect(parseStreamJsonLine(line)).toEqual({ kind: 'ignored' });
+    });
+
+    it('tool_use の input がない場合はツール名を target にする', () => {
+      const line = assistantEvent([{ type: 'tool_use', id: 'toolu_1', name: 'CustomTool' }]);
+
+      expect(parseStreamJsonLine(line)).toEqual({
+        kind: 'progress',
+        event: { kind: 'tool_use', toolName: 'CustomTool', target: 'CustomTool' },
+      });
     });
 
     it('assistant だが text 型 → ignored', () => {

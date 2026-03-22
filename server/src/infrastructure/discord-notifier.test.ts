@@ -29,6 +29,12 @@ const usageWithData: UsageInfo = {
   sevenDaySonnet: null,
 };
 
+const usageWithSonnet: UsageInfo = {
+  fiveHour: { utilization: 45, resetsAt: '2026-03-20T07:00:00Z' },
+  sevenDay: null,
+  sevenDaySonnet: { utilization: 80, resetsAt: '2026-03-22T02:00:00Z' },
+};
+
 const usageEmpty: UsageInfo = {
   fiveHour: null,
   sevenDay: null,
@@ -134,6 +140,18 @@ describe('createNotifier', () => {
       expect(options.embeds[0].footer?.text).toBe('📊 5h 45% | 7d 30%');
     });
 
+    it('Sonnet 利用状況がフッターに含まれる', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'result', text: '完了' });
+      notify({ type: 'usage', usage: usageWithSonnet });
+
+      expect(sent).toHaveLength(1);
+      const options = sent[0].content as SendOptions;
+      expect(options.embeds[0].footer?.text).toBe('📊 5h 45% | Sonnet 80%');
+    });
+
     it('usage データがない場合はフッターなし', () => {
       const { thread, sent } = createMockThread();
       const notify = createNotifier(thread);
@@ -142,6 +160,22 @@ describe('createNotifier', () => {
       notify({ type: 'usage', usage: usageEmpty });
 
       const options = sent[0].content as SendOptions;
+      expect(options.embeds[0].footer).toBeUndefined();
+    });
+
+    it('4096 文字超の result（usage データなし）はプレーンテキスト分割 + 空 Embed', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      const longText = 'A'.repeat(5000);
+      notify({ type: 'result', text: longText });
+      notify({ type: 'usage', usage: usageEmpty });
+
+      expect(sent).toHaveLength(4);
+      expect(sent[0].type).toBe('text');
+      expect(sent[3].type).toBe('embed');
+      const options = sent[3].content as SendOptions;
+      expect(options.embeds[0].color).toBe(0x00c853);
       expect(options.embeds[0].footer).toBeUndefined();
     });
 
@@ -268,10 +302,26 @@ describe('createNotifier', () => {
     });
   });
 
+  // ----- error + usage フッターなし -----
+
+  describe('error + usage フッターなし', () => {
+    it('error 通知で usage データなしの場合もフッターなし', () => {
+      const { thread, sent } = createMockThread();
+      const notify = createNotifier(thread);
+
+      notify({ type: 'error', message: 'failed', exitCode: 2 });
+      notify({ type: 'usage', usage: usageEmpty });
+
+      const options = sent[0].content as SendOptions;
+      expect(options.embeds[0].color).toBe(0xff1744);
+      expect(options.embeds[0].footer).toBeUndefined();
+    });
+  });
+
   // ----- 送信エラー -----
 
   describe('送信エラー', () => {
-    it('send が失敗してもエラーを投げない', () => {
+    it('テキスト send が失敗してもエラーを投げない', () => {
       const thread: ThreadSender = {
         send: vi.fn(() => Promise.reject(new Error('network error'))),
         setName: vi.fn(() => Promise.resolve()),
@@ -279,6 +329,17 @@ describe('createNotifier', () => {
       const notify = createNotifier(thread);
 
       expect(() => notify({ type: 'info', message: 'test' })).not.toThrow();
+    });
+
+    it('embed send が失敗してもエラーを投げない', () => {
+      const thread: ThreadSender = {
+        send: vi.fn(() => Promise.reject(new Error('network error'))),
+        setName: vi.fn(() => Promise.resolve()),
+      };
+      const notify = createNotifier(thread);
+
+      notify({ type: 'result', text: '完了' });
+      expect(() => notify({ type: 'usage', usage: usageEmpty })).not.toThrow();
     });
   });
 });

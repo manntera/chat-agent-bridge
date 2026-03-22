@@ -8,7 +8,7 @@ import { ClaudeProcess } from './claude-process.js';
 
 class MockChildProcess extends EventEmitter {
   readonly stdin = null;
-  readonly stderr = null;
+  readonly stderr = new EventEmitter();
   readonly stdout = new EventEmitter();
   pid = 1234;
   killed = false;
@@ -247,6 +247,17 @@ describe('ClaudeProcess', () => {
       expect(ctx.progressEvents).toHaveLength(0);
     });
 
+    it('空行は無視される', () => {
+      const ctx = createTestContext();
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
+      const proc = latestProcess(ctx);
+
+      sendStdout(proc, '');
+      sendStdout(proc, '   ');
+
+      expect(ctx.progressEvents).toHaveLength(0);
+    });
+
     it('不完全な行はバッファリングされ、次のチャンクと結合される', () => {
       const ctx = createTestContext();
       ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
@@ -308,7 +319,18 @@ describe('ClaudeProcess', () => {
       expect(ctx.claudeProcess.isRunning).toBe(false);
     });
 
-    it('result イベントがない場合は空文字列を出力として渡す', () => {
+    it('result イベントがない場合は stderr を出力として渡す', () => {
+      const ctx = createTestContext();
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
+      const proc = latestProcess(ctx);
+
+      proc.stderr.emit('data', Buffer.from('stderr output'));
+      simulateClose(proc, 0);
+
+      expect(ctx.endCalls[0]).toEqual({ exitCode: 0, output: 'stderr output' });
+    });
+
+    it('result イベントも stderr もない場合は空文字列', () => {
       const ctx = createTestContext();
       ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
       const proc = latestProcess(ctx);
@@ -316,6 +338,16 @@ describe('ClaudeProcess', () => {
       simulateClose(proc, 0);
 
       expect(ctx.endCalls[0]).toEqual({ exitCode: 0, output: '' });
+    });
+
+    it('exitCode が null の場合は 1 として扱う', () => {
+      const ctx = createTestContext();
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
+      const proc = latestProcess(ctx);
+
+      proc.emit('close', null);
+
+      expect(ctx.endCalls[0].exitCode).toBe(1);
     });
 
     it('プロセス終了後に再度 spawn できる', () => {
@@ -381,6 +413,26 @@ describe('ClaudeProcess', () => {
       // 10秒経過させても SIGKILL は呼ばれない
       vi.advanceTimersByTime(10_000);
 
+      const killCalls = killSpy.mock.calls.map(([sig]) => sig);
+      expect(killCalls).toEqual(['SIGINT']);
+    });
+
+    it('SIGKILL タイマー発火時にプロセスが既に終了している場合は何もしない', () => {
+      const ctx = createTestContext();
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false);
+      const proc = latestProcess(ctx);
+      const killSpy = vi.spyOn(proc, 'kill');
+
+      ctx.claudeProcess.interrupt();
+
+      // close イベント前に process を null にする（error イベントで起こりうる）
+      proc.emit('error', new Error('unexpected'));
+
+      // 10秒経過してもプロセスが既にnullなのでSIGKILLは送信されない
+      vi.advanceTimersByTime(10_000);
+
+      // SIGINT + (error callbackでprocess=null) → SIGKILLは呼ばれない
+      // ただし error が先に呼ばれ、interrupt の killTimer がまだある
       const killCalls = killSpy.mock.calls.map(([sig]) => sig);
       expect(killCalls).toEqual(['SIGINT']);
     });

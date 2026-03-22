@@ -160,6 +160,44 @@ describe('resolvePrompt', () => {
     });
   });
 
+  // ----- デフォルト fetch を使用 -----
+
+  describe('デフォルト fetch', () => {
+    it('fetchFn 未指定時はグローバル fetch を使用する', async () => {
+      const mockGlobalFetch = vi.fn().mockResolvedValue({
+        ok: true,
+        text: () => Promise.resolve('ダウンロード結果'),
+      });
+      vi.stubGlobal('fetch', mockGlobalFetch);
+
+      const result = await resolvePrompt('指示', [textAttachment()]);
+
+      expect(result.prompt).toBe('指示\n\nダウンロード結果');
+      expect(mockGlobalFetch).toHaveBeenCalledWith(
+        'https://cdn.discord.com/attachments/123/message.txt',
+      );
+
+      vi.unstubAllGlobals();
+    });
+
+    it('デフォルト fetch が HTTP エラーの場合は content のみ', async () => {
+      vi.stubGlobal(
+        'fetch',
+        vi.fn().mockResolvedValue({
+          ok: false,
+          status: 500,
+        }),
+      );
+
+      const result = await resolvePrompt('指示', [textAttachment()]);
+
+      expect(result.prompt).toBe('指示');
+      expect(result.error).toBeNull();
+
+      vi.unstubAllGlobals();
+    });
+  });
+
   // ----- ダウンロード失敗 -----
 
   describe('ダウンロード失敗', () => {

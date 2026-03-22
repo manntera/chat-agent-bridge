@@ -116,4 +116,61 @@ describe('TitleGenerator', () => {
 
     expect(title).toBeNull();
   });
+
+  it('fetch がネットワークエラーの場合は null を返す', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network error')));
+
+    const generator = await createGenerator();
+    const title = await generator.generate('session-123', '/work');
+
+    expect(title).toBeNull();
+  });
+
+  it('タイムアウト(AbortError)の場合は null を返す', async () => {
+    // fetch を遅延させて setTimeout(controller.abort) が先に発火するようにする
+    const mockFetch = vi.fn().mockImplementation(
+      (_url: string, options: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          const onAbort = () => {
+            reject(Object.assign(new Error('abort'), { name: 'AbortError' }));
+          };
+          if (options.signal.aborted) {
+            onAbort();
+          } else {
+            options.signal.addEventListener('abort', onAbort);
+          }
+        }),
+    );
+    vi.stubGlobal('fetch', mockFetch);
+
+    vi.useFakeTimers();
+
+    const generator = await createGenerator();
+    const promise = generator.generate('session-123', '/work');
+
+    // タイムアウトを発火させる（TitleGenerator の TIMEOUT_MS = 10_000）
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    const title = await promise;
+
+    expect(title).toBeNull();
+
+    vi.useRealTimers();
+  });
+
+  it('100文字以下のタイトルはそのまま返す', async () => {
+    const shortTitle = 'バグ修正';
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: () => Promise.resolve(geminiResponse(shortTitle)),
+      }),
+    );
+
+    const generator = await createGenerator();
+    const title = await generator.generate('session-123', '/work');
+
+    expect(title).toBe(shortTitle);
+  });
 });

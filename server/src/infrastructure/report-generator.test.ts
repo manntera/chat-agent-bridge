@@ -150,15 +150,112 @@ describe('ReportGenerator', () => {
   });
 
   it('タイムアウト時は null を返す', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockRejectedValue(Object.assign(new Error('abort'), { name: 'AbortError' })),
+    const mockFetch = vi.fn().mockImplementation(
+      (_url: string, options: { signal: AbortSignal }) =>
+        new Promise((_resolve, reject) => {
+          const onAbort = () => {
+            reject(Object.assign(new Error('abort'), { name: 'AbortError' }));
+          };
+          if (options.signal.aborted) {
+            onAbort();
+          } else {
+            options.signal.addEventListener('abort', onAbort);
+          }
+        }),
     );
+    vi.stubGlobal('fetch', mockFetch);
+
+    vi.useFakeTimers();
+
+    const generator = await createGenerator();
+    const promise = generator.generate(makeSessions(), new Date());
+
+    // タイムアウトを発火させる（ReportGenerator の TIMEOUT_MS = 60_000）
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    const report = await promise;
+
+    expect(report).toBeNull();
+
+    vi.useRealTimers();
+  });
+
+  it('fetch がネットワークエラーの場合は null を返す', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('network error')));
 
     const generator = await createGenerator();
     const report = await generator.generate(makeSessions(), new Date());
 
     expect(report).toBeNull();
+  });
+
+  it('長い会話は末尾が優先的に切り詰められる', async () => {
+    const longSession: DailySession[] = [
+      {
+        sessionId: 'long',
+        title: '長いセッション',
+        messageCount: 100,
+        entries: [
+          { role: 'user', text: 'A'.repeat(50_000) },
+          { role: 'assistant', text: 'B'.repeat(50_000) },
+        ],
+      },
+    ];
+
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(geminiResponse('要約テキスト')),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const generator = await createGenerator();
+    await generator.generate(longSession, new Date('2026-03-22T00:00:00+09:00'));
+
+    // Pass 1 のプロンプトが 30000 文字以内に切り詰められていること
+    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const promptText = body.contents[0].parts[0].text;
+    // The conversation part should be truncated to ~30000 chars
+    expect(promptText.length).toBeLessThan(35_000);
+  });
+
+  it('6セッション以上は同時実行数制限で分割される', async () => {
+    const mockFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(geminiResponse('要約')),
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const generator = await createGenerator();
+    // 7セッション → 5 + 2 のバッチ + 1 Pass2 = 8回
+    await generator.generate(makeSessions(7), new Date('2026-03-22T00:00:00+09:00'));
+
+    expect(mockFetch).toHaveBeenCalledTimes(8);
+  });
+
+  it('Gemini API がテキストなしのレスポンスを返した場合、そのセッションはスキップされる', async () => {
+    let callCount = 0;
+    const mockFetch = vi.fn().mockImplementation(() => {
+      callCount++;
+      if (callCount === 1) {
+        // 1つ目のセッション要約はテキストなし
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ candidates: [{ content: { parts: [] } }] }),
+        });
+      }
+      // 2つ目と Pass 2 は成功
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve(geminiResponse('成功')),
+      });
+    });
+    vi.stubGlobal('fetch', mockFetch);
+
+    const generator = await createGenerator();
+    const report = await generator.generate(makeSessions(), new Date('2026-03-22T00:00:00+09:00'));
+
+    expect(report).not.toBeNull();
+    expect(report).toContain('📋 **日報 — 2026-03-22**');
   });
 
   it('一部の Pass 1 が失敗しても成功したセッションで日報を生成する', async () => {
