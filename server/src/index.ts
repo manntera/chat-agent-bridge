@@ -464,7 +464,8 @@ async function main(): Promise<void> {
         const sessions = await sessionStore.listSessionsByDateRange(config.workDir, from, to);
 
         if (sessions.length === 0) {
-          const dateLabel = dateStr ?? targetDate.toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
+          const dateLabel =
+            dateStr ?? targetDate.toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
           await interaction.editReply(`⚠️ ${dateLabel} のセッションが見つかりません`);
           return;
         }

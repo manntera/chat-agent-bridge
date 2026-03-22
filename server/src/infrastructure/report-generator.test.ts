@@ -36,8 +36,10 @@ describe('ReportGenerator', () => {
   }
 
   it('正常系: 2段階で日報を生成する', async () => {
-    const sessionSummary = '【作業内容】\nタスクを実施\n【技術的な判断】\nなし\n【課題・問題点】\nなし\n【次のアクション】\nなし';
-    const reportBody = '## やったこと\n### タスク1\n詳細\n## 技術的な判断・決定事項\nなし\n## 発生した課題・ブロッカー\nなし\n## 次にやること\n- なし';
+    const sessionSummary =
+      '【作業内容】\nタスクを実施\n【技術的な判断】\nなし\n【課題・問題点】\nなし\n【次のアクション】\nなし';
+    const reportBody =
+      '## やったこと\n### タスク1\n詳細\n## 技術的な判断・決定事項\nなし\n## 発生した課題・ブロッカー\nなし\n## 次にやること\n- なし';
 
     let callCount = 0;
     const mockFetch = vi.fn().mockImplementation(() => {

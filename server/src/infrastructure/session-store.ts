@@ -106,11 +106,7 @@ export class SessionStore implements ISessionStore {
     return all.slice(0, MAX_SESSIONS);
   }
 
-  async listSessionsByDateRange(
-    workDir: string,
-    from: Date,
-    to: Date,
-  ): Promise<SessionSummary[]> {
+  async listSessionsByDateRange(workDir: string, from: Date, to: Date): Promise<SessionSummary[]> {
     const all = await this.allSessions(workDir);
     const filtered = all.filter(
       (s) => s.lastModified.getTime() >= from.getTime() && s.lastModified.getTime() < to.getTime(),
