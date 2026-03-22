@@ -170,8 +170,8 @@ describe('ReportGenerator', () => {
     const generator = await createGenerator();
     const promise = generator.generate(makeSessions(), new Date());
 
-    // タイムアウトを発火させる（ReportGenerator の TIMEOUT_MS = 60_000）
-    await vi.advanceTimersByTimeAsync(60_000);
+    // タイムアウトを発火させる（ReportGenerator の TIMEOUT_MS = 300_000）
+    await vi.advanceTimersByTimeAsync(300_000);
 
     const report = await promise;
 
