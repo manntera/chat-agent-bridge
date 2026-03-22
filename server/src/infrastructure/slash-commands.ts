@@ -31,4 +31,16 @@ export const ccCommand = new SlashCommandBuilder()
       ),
   )
   .addSubcommand((sub) => sub.setName('interrupt').setDescription('処理を中断します'))
-  .addSubcommand((sub) => sub.setName('resume').setDescription('過去のセッションを再開します'));
+  .addSubcommand((sub) => sub.setName('resume').setDescription('過去のセッションを再開します'))
+  .addSubcommand((sub) =>
+    sub
+      .setName('report')
+      .setDescription('日報を生成します')
+      .addStringOption((opt) =>
+        opt
+          .setName('date')
+          .setDescription('対象日（YYYY-MM-DD、-1=昨日 等。省略時: 今日）')
+          .setRequired(false)
+          .setAutocomplete(true),
+      ),
+  );

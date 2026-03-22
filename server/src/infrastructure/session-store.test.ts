@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtemp, writeFile, rm, mkdir, utimes } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { extractFirstUserMessage, SessionStore } from './session-store.js';
+import { extractFirstUserMessage, getDayBoundary, SessionStore } from './session-store.js';
 
 let tempDir: string;
 
@@ -194,6 +194,35 @@ describe('SessionStore', () => {
 
     expect(result).toHaveLength(1);
     expect(result[0].sessionId).toBe('aaa');
+  });
+});
+
+describe('getDayBoundary', () => {
+  it('朝6時 JST を境界とする', () => {
+    // 2026-03-22 の日報 = 2026-03-22 06:00 JST ~ 2026-03-23 06:00 JST
+    const date = new Date('2026-03-22T00:00:00+09:00');
+    const { from, to } = getDayBoundary(date);
+
+    // JST 06:00 = UTC 21:00 (前日)
+    expect(from.toISOString()).toBe('2026-03-21T21:00:00.000Z');
+    expect(to.toISOString()).toBe('2026-03-22T21:00:00.000Z');
+  });
+
+  it('時間範囲は24時間', () => {
+    const date = new Date('2026-03-22T12:00:00+09:00');
+    const { from, to } = getDayBoundary(date);
+
+    expect(to.getTime() - from.getTime()).toBe(24 * 60 * 60 * 1000);
+  });
+
+  it('日付の時刻部分に関わらず同じ日なら同じ境界', () => {
+    const morning = new Date('2026-03-22T08:00:00+09:00');
+    const evening = new Date('2026-03-22T23:00:00+09:00');
+
+    const { from: from1 } = getDayBoundary(morning);
+    const { from: from2 } = getDayBoundary(evening);
+
+    expect(from1.toISOString()).toBe(from2.toISOString());
   });
 });
 

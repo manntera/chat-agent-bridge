@@ -22,6 +22,10 @@ import { resolvePrompt } from './infrastructure/attachment-resolver.js';
 import { SessionStore } from './infrastructure/session-store.js';
 import { ccCommand } from './infrastructure/slash-commands.js';
 import { TitleGenerator } from './infrastructure/title-generator.js';
+import { ReportGenerator } from './infrastructure/report-generator.js';
+import type { DailySession } from './infrastructure/report-generator.js';
+import { readSession } from './infrastructure/session-reader.js';
+import { getDayBoundary } from './infrastructure/session-store.js';
 import { UsageFetcher } from './infrastructure/usage-fetcher.js';
 
 function formatRelativeDate(date: Date): string {
@@ -34,6 +38,66 @@ function formatRelativeDate(date: Date): string {
   const diffDay = Math.floor(diffHour / 24);
   if (diffDay < 30) return `${diffDay}日前`;
   return date.toLocaleDateString('ja-JP');
+}
+
+/** 現在の「今日」を JST 基準で取得（6時前なら前日扱い） */
+function todayJST(): Date {
+  const now = new Date();
+  const jstNow = new Date(now.getTime() + 9 * 60 * 60 * 1000);
+  if (jstNow.getUTCHours() < 6) {
+    jstNow.setUTCDate(jstNow.getUTCDate() - 1);
+  }
+  return new Date(
+    Date.parse(
+      `${jstNow.getUTCFullYear()}-${String(jstNow.getUTCMonth() + 1).padStart(2, '0')}-${String(jstNow.getUTCDate()).padStart(2, '0')}T00:00:00+09:00`,
+    ),
+  );
+}
+
+/** JST の Date を YYYY-MM-DD 形式の文字列に変換 */
+function formatJSTDate(date: Date): string {
+  const jst = new Date(date.getTime() + 9 * 60 * 60 * 1000);
+  const y = jst.getUTCFullYear();
+  const m = String(jst.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(jst.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+/**
+ * ユーザー入力の日付文字列をパースする。
+ * - YYYY-MM-DD 形式
+ * - 相対指定: -1(昨日), -2(一昨日), 0(今日) 等
+ * 不正な値の場合は null を返す。
+ */
+function parseDateInput(input: string): Date | null {
+  // 相対指定: -N, +N, 0
+  const relativeMatch = input.match(/^([+-]?\d+)$/);
+  if (relativeMatch) {
+    const offset = parseInt(relativeMatch[1], 10);
+    const base = todayJST();
+    base.setDate(base.getDate() + offset);
+    return base;
+  }
+
+  // YYYY-MM-DD 形式
+  const parsed = Date.parse(input + 'T00:00:00+09:00');
+  if (isNaN(parsed)) return null;
+  return new Date(parsed);
+}
+
+/** オートコンプリート用: 直近の日付候補を生成 */
+function generateDateChoices(): { name: string; value: string }[] {
+  const labels = ['今日', '昨日', '一昨日'];
+  const choices: { name: string; value: string }[] = [];
+  const base = todayJST();
+
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(base.getTime() - i * 24 * 60 * 60 * 1000);
+    const dateStr = formatJSTDate(d);
+    const label = labels[i] ?? `${i}日前`;
+    choices.push({ name: `${label} (${dateStr})`, value: dateStr });
+  }
+  return choices;
 }
 
 function log(message: string): void {
@@ -107,6 +171,7 @@ async function main(): Promise<void> {
   const sessionStore = new SessionStore();
   const usageFetcher = new UsageFetcher();
   const titleGenerator = config.geminiApiKey ? new TitleGenerator(config.geminiApiKey) : null;
+  const reportGenerator = config.geminiApiKey ? new ReportGenerator(config.geminiApiKey) : null;
 
   /** セッションコンテキストを作成し SessionManager に登録する */
   function createSession(threadId: string, thread: ThreadSender): SessionContext {
@@ -213,6 +278,20 @@ async function main(): Promise<void> {
 
   // スラッシュコマンドイベント
   client.on(Events.InteractionCreate, async (interaction) => {
+    // オートコンプリートイベント（/cc report の date）
+    if (interaction.isAutocomplete() && interaction.commandName === 'cc') {
+      const focused = interaction.options.getFocused(true);
+      if (focused.name === 'date') {
+        const choices = generateDateChoices();
+        const input = focused.value.toLowerCase();
+        const filtered = input
+          ? choices.filter((c) => c.name.includes(input) || c.value.includes(input))
+          : choices;
+        await interaction.respond(filtered.slice(0, 25));
+      }
+      return;
+    }
+
     // StringSelectMenu の選択イベント（/cc resume のセッション選択）
     if (interaction.isStringSelectMenu() && interaction.customId === 'cc_resume_select') {
       const selectedSessionId = interaction.values[0];
@@ -348,6 +427,98 @@ async function main(): Promise<void> {
         await interaction.reply({ content: '既に中断処理中です', ephemeral: true });
       } else {
         await interaction.reply({ content: '処理中ではありません', ephemeral: true });
+      }
+      return;
+    }
+
+    // /cc report — 日報を生成
+    if (subcommand === 'report') {
+      if (!reportGenerator) {
+        await interaction.reply({
+          content: '⚠️ 日報生成には GEMINI_API_KEY の設定が必要です',
+          ephemeral: true,
+        });
+        return;
+      }
+
+      await interaction.deferReply();
+
+      try {
+        const dateStr = interaction.options.getString('date');
+        let targetDate: Date;
+
+        if (dateStr) {
+          const parsed = parseDateInput(dateStr);
+          if (!parsed) {
+            await interaction.editReply(
+              '⚠️ 日付の形式が不正です（YYYY-MM-DD または -1, -2 等の相対指定で入力してください）',
+            );
+            return;
+          }
+          targetDate = parsed;
+        } else {
+          targetDate = todayJST();
+        }
+
+        const { from, to } = getDayBoundary(targetDate);
+        const sessions = await sessionStore.listSessionsByDateRange(config.workDir, from, to);
+
+        if (sessions.length === 0) {
+          const dateLabel = dateStr ?? targetDate.toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
+          await interaction.editReply(`⚠️ ${dateLabel} のセッションが見つかりません`);
+          return;
+        }
+
+        log(`日報生成開始: ${sessions.length} セッション`);
+
+        // 各セッションの会話を読み込み
+        const dailySessions: DailySession[] = [];
+        for (const s of sessions) {
+          try {
+            const entries = await readSession(s.sessionId, config.workDir);
+            dailySessions.push({
+              sessionId: s.sessionId,
+              title: s.slug ?? s.firstUserMessage.slice(0, 50),
+              messageCount: entries.length,
+              entries,
+            });
+          } catch {
+            log(`セッション読み込みスキップ: ${s.sessionId}`);
+          }
+        }
+
+        if (dailySessions.length === 0) {
+          await interaction.editReply('⚠️ セッションの読み込みに失敗しました');
+          return;
+        }
+
+        const report = await reportGenerator.generate(dailySessions, targetDate);
+
+        if (!report) {
+          await interaction.editReply('⚠️ 日報の生成に失敗しました');
+          return;
+        }
+
+        // Discord の文字数上限（2000文字）で分割送信
+        if (report.length <= 2000) {
+          await interaction.editReply(report);
+        } else {
+          const chunks: string[] = [];
+          let remaining = report;
+          while (remaining.length > 0) {
+            chunks.push(remaining.slice(0, 2000));
+            remaining = remaining.slice(2000);
+          }
+          await interaction.editReply(chunks[0]);
+          for (let i = 1; i < chunks.length; i++) {
+            await channel.send(chunks[i]);
+          }
+        }
+
+        log('日報生成完了');
+      } catch (err) {
+        console.error('Report generation error:', err);
+        await interaction.editReply('⚠️ 日報の生成中にエラーが発生しました');
       }
       return;
     }
