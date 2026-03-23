@@ -6,9 +6,11 @@ export class Session {
   private _isNew = false;
   private _options: SessionOptions = {};
   readonly workDir: string;
+  readonly workspaceName: string;
 
-  constructor(workDir: string) {
+  constructor(workDir: string, workspaceName: string) {
     this.workDir = workDir;
+    this.workspaceName = workspaceName;
   }
 
   get sessionId(): string | null {

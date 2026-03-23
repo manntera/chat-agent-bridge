@@ -1,10 +1,13 @@
+import { homedir } from 'node:os';
+
 export interface Config {
   discordToken: string;
   channelId: string;
   allowedUserIds: string[];
-  workDir: string;
   claudePath: string;
   geminiApiKey: string | null;
+  workspacesFile: string;
+  workspaceBaseDir: string;
 }
 
 function requireEnv(name: string): string {
@@ -22,8 +25,9 @@ export function loadConfig(): Config {
     allowedUserIds: requireEnv('ALLOWED_USER_IDS')
       .split(',')
       .map((id) => id.trim()),
-    workDir: requireEnv('WORK_DIR'),
     claudePath: process.env.CLAUDE_PATH || 'claude',
     geminiApiKey: process.env.GEMINI_API_KEY || null,
+    workspacesFile: process.env.WORKSPACES_FILE || 'workspaces.json',
+    workspaceBaseDir: process.env.WORKSPACE_BASE_DIR || homedir(),
   };
 }

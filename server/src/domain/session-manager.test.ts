@@ -30,7 +30,7 @@ class MockClaudeProcess implements IClaudeProcess {
 const WORK_DIR = '/home/user/projects/test';
 
 function createSessionContext(threadId: string): SessionContext {
-  const session = new Session(WORK_DIR);
+  const session = new Session(WORK_DIR, 'test-project');
   const claudeProcess = new MockClaudeProcess();
   const notifications: Notification[] = [];
   const notify = (n: Notification) => notifications.push(n);

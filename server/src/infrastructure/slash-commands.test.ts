@@ -33,6 +33,20 @@ describe('ccCommand', () => {
     expect(choices?.map((c) => c.value)).toEqual(['sonnet', 'opus', 'haiku']);
   });
 
+  it('サブコマンドグループ "workspace" が定義されている', () => {
+    const group = json.options?.find((o) => o.name === 'workspace');
+    expect(group).toBeDefined();
+  });
+
+  it('"workspace" グループに add, remove, list サブコマンドがある', () => {
+    const group = json.options?.find((o) => o.name === 'workspace') as Record<string, unknown>;
+    const subs = group?.options as Array<Record<string, unknown>>;
+    const names = subs?.map((s) => s.name);
+    expect(names).toContain('add');
+    expect(names).toContain('remove');
+    expect(names).toContain('list');
+  });
+
   it('"new" サブコマンドに effort オプションがある（3つの選択肢）', () => {
     const sub = json.options?.find((o) => o.name === 'new') as Record<string, unknown>;
     const options = sub?.options as Array<Record<string, unknown>>;
