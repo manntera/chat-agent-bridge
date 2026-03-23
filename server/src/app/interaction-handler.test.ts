@@ -45,7 +45,7 @@ function createTestContext() {
   const handler = createInteractionHandler(accessControl, sessionManager);
 
   function registerSession(threadId: string) {
-    const session = new Session(WORK_DIR);
+    const session = new Session(WORK_DIR, 'test-project');
     const mockProcess = new MockClaudeProcess();
     const notifications: Notification[] = [];
     const notify = (n: Notification) => notifications.push(n);

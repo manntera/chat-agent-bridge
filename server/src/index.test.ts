@@ -73,7 +73,7 @@ function createIntegrationContext() {
   const sessionManager = new SessionManager();
 
   // セッションを作成してスレッドに紐づける
-  const session = new Session(CONFIG.workDir);
+  const session = new Session(CONFIG.workDir, 'test-project');
 
   let onProgress: (event: ProgressEvent) => void = () => {};
   let onProcessEnd: (exitCode: number, output: string) => void = () => {};
@@ -368,7 +368,7 @@ describe('統合テスト: コンポーネント配線', () => {
         setName: vi.fn(() => Promise.resolve()),
       };
 
-      const session2 = new Session(CONFIG.workDir);
+      const session2 = new Session(CONFIG.workDir, 'test-project');
       let onProgress2: (event: ProgressEvent) => void = () => {};
       let onProcessEnd2: (exitCode: number, output: string) => void = () => {};
       const claudeProcess2 = new ClaudeProcess(

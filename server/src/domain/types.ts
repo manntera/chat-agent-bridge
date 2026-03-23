@@ -48,6 +48,11 @@ export interface ISessionStore {
   listSessions(workDir: string): Promise<SessionSummary[]>;
 }
 
+export interface Workspace {
+  name: string;
+  path: string;
+}
+
 export interface IClaudeProcess {
   readonly isRunning: boolean;
   spawn(

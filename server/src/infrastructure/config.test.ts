@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { homedir } from 'node:os';
 import { loadConfig } from './config.js';
 
 describe('loadConfig', () => {
@@ -16,7 +17,6 @@ describe('loadConfig', () => {
     process.env.DISCORD_TOKEN = 'test-token';
     process.env.CHANNEL_ID = '123456789';
     process.env.ALLOWED_USER_IDS = '111,222,333';
-    process.env.WORK_DIR = '/home/user/projects';
   }
 
   // ----- 正常系 -----
@@ -31,9 +31,10 @@ describe('loadConfig', () => {
         discordToken: 'test-token',
         channelId: '123456789',
         allowedUserIds: ['111', '222', '333'],
-        workDir: '/home/user/projects',
         claudePath: 'claude',
         geminiApiKey: null,
+        workspacesFile: 'workspaces.json',
+        workspaceBaseDir: homedir(),
       });
     });
 
@@ -96,13 +97,6 @@ describe('loadConfig', () => {
       delete process.env.ALLOWED_USER_IDS;
 
       expect(() => loadConfig()).toThrow('ALLOWED_USER_IDS');
-    });
-
-    it('WORK_DIR が未設定 → エラー', () => {
-      setValidEnv();
-      delete process.env.WORK_DIR;
-
-      expect(() => loadConfig()).toThrow('WORK_DIR');
     });
 
     it('DISCORD_TOKEN が空文字列 → エラー', () => {

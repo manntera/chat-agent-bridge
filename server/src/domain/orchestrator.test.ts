@@ -48,7 +48,7 @@ class MockClaudeProcess implements IClaudeProcess {
 const WORK_DIR = '/home/user/projects/test';
 
 function createOrchestrator() {
-  const session = new Session(WORK_DIR);
+  const session = new Session(WORK_DIR, 'test-project');
   const mockProcess = new MockClaudeProcess();
   const notifications: Notification[] = [];
   const notify = (n: Notification) => notifications.push(n);
@@ -735,7 +735,7 @@ describe('Orchestrator', () => {
     };
 
     function createOrchestratorWithFetcher(fetcher: IUsageFetcher) {
-      const session = new Session(WORK_DIR);
+      const session = new Session(WORK_DIR, 'test-project');
       const mockProcess = new MockClaudeProcess();
       const notifications: Notification[] = [];
       const notify = (n: Notification) => notifications.push(n);
