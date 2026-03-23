@@ -8,6 +8,7 @@ export interface EmbedData {
 }
 
 export interface SendOptions {
+  content?: string;
   embeds: EmbedData[];
 }
 
@@ -53,6 +54,11 @@ type PendingResult =
   | { type: 'result'; text: string }
   | { type: 'error'; message: string; exitCode: number };
 
+export interface Notifier {
+  notify: NotifyFn;
+  setAuthorId(authorId: string): void;
+}
+
 /**
  * セッションスレッド用の Notifier を作成する。
  *
@@ -60,16 +66,26 @@ type PendingResult =
  * - progress / info → プレーンテキストとして即座に送信
  * - result / error → バッファ（usage を待つ）
  * - usage → バッファされた result/error と結合して Embed で送信
+ *
+ * setAuthorId で質問者を設定すると、started / result / error 送信時にメンションを付与する。
  */
-export function createNotifier(thread: ThreadSender): NotifyFn {
+export function createNotifier(thread: ThreadSender): Notifier {
   let pendingResult: PendingResult | null = null;
+  let currentAuthorId: string | null = null;
+
+  function mention(): string | null {
+    return currentAuthorId ? `<@${currentAuthorId}>` : null;
+  }
 
   function sendText(text: string): void {
     thread.send(text).catch((err) => console.error('Discord send error:', err));
   }
 
-  function sendEmbed(embed: EmbedData): void {
-    thread.send({ embeds: [embed] }).catch((err) => console.error('Discord send error:', err));
+  function sendEmbed(embed: EmbedData, withMention = false): void {
+    const m = withMention ? mention() : null;
+    const opts: SendOptions = { embeds: [embed] };
+    if (m) opts.content = m;
+    thread.send(opts).catch((err) => console.error('Discord send error:', err));
   }
 
   function flush(usage: UsageInfo): void {
@@ -91,11 +107,16 @@ export function createNotifier(thread: ThreadSender): NotifyFn {
           description: result.text,
         };
         if (footer) embed.footer = { text: footer };
-        sendEmbed(embed);
+        sendEmbed(embed, true);
       } else {
         const chunks = splitMessage(result.text);
-        for (const chunk of chunks) {
-          sendText(chunk);
+        const m = mention();
+        for (let i = 0; i < chunks.length; i++) {
+          if (i === 0 && m) {
+            sendText(`${m} ${chunks[i]}`);
+          } else {
+            sendText(chunks[i]);
+          }
         }
         const embed: EmbedData = { color: COLOR_SUCCESS };
         if (footer) embed.footer = { text: footer };
@@ -108,11 +129,11 @@ export function createNotifier(thread: ThreadSender): NotifyFn {
         description: result.message,
       };
       if (footer) embed.footer = { text: footer };
-      sendEmbed(embed);
+      sendEmbed(embed, true);
     }
   }
 
-  return (notification: Notification) => {
+  const notify: NotifyFn = (notification: Notification) => {
     switch (notification.type) {
       case 'progress':
         sendText(formatProgress(notification));
@@ -134,5 +155,12 @@ export function createNotifier(thread: ThreadSender): NotifyFn {
         flush(notification.usage);
         break;
     }
+  };
+
+  return {
+    notify,
+    setAuthorId(authorId: string) {
+      currentAuthorId = authorId;
+    },
   };
 }

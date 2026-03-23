@@ -35,7 +35,7 @@ function createSessionContext(threadId: string): SessionContext {
   const notifications: Notification[] = [];
   const notify = (n: Notification) => notifications.push(n);
   const orchestrator = new Orchestrator(session, claudeProcess, notify);
-  return { orchestrator, session, claudeProcess, threadId };
+  return { orchestrator, session, claudeProcess, threadId, setAuthorId: () => {} };
 }
 
 // =================================================================

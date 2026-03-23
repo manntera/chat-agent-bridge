@@ -97,7 +97,7 @@ async function main(): Promise<void> {
     const notifier = createNotifier(thread);
     const notify = (notification: Notification): void => {
       logNotification(notification);
-      notifier(notification);
+      notifier.notify(notification);
     };
 
     const orchestrator = new Orchestrator(session, claudeProcess, notify, usageFetcher);
@@ -123,7 +123,13 @@ async function main(): Promise<void> {
       }
     };
 
-    const ctx: SessionContext = { orchestrator, session, claudeProcess, threadId };
+    const ctx: SessionContext = {
+      orchestrator,
+      session,
+      claudeProcess,
+      threadId,
+      setAuthorId: (authorId) => notifier.setAuthorId(authorId),
+    };
     sessionManager.register(threadId, ctx);
     return ctx;
   }
@@ -168,6 +174,9 @@ async function main(): Promise<void> {
     );
 
     const ctx = sessionManager.get(msg.channelId);
+    if (ctx) {
+      ctx.setAuthorId(msg.author.id);
+    }
     const prevState = ctx?.orchestrator.state;
 
     handleMessage({

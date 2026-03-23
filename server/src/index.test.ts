@@ -86,13 +86,19 @@ function createIntegrationContext() {
   );
 
   const notifier = createNotifier(mockThread);
-  const orchestrator = new Orchestrator(session, claudeProcess, notifier);
+  const orchestrator = new Orchestrator(session, claudeProcess, notifier.notify);
 
   onProgress = (event) => orchestrator.onProgress(event);
   onProcessEnd = (exitCode, output) => orchestrator.onProcessEnd(exitCode, output);
 
   session.ensure();
-  sessionManager.register(THREAD_ID, { orchestrator, session, claudeProcess, threadId: THREAD_ID });
+  sessionManager.register(THREAD_ID, {
+    orchestrator,
+    session,
+    claudeProcess,
+    threadId: THREAD_ID,
+    setAuthorId: (authorId) => notifier.setAuthorId(authorId),
+  });
 
   // App 層
   const rawHandleMessage = createMessageHandler(accessControl, sessionManager);
@@ -378,7 +384,7 @@ describe('統合テスト: コンポーネント配線', () => {
         ctx.mockSpawnFn,
       );
       const notifier2 = createNotifier(mockThread2);
-      const orchestrator2 = new Orchestrator(session2, claudeProcess2, notifier2);
+      const orchestrator2 = new Orchestrator(session2, claudeProcess2, notifier2.notify);
       onProgress2 = (event) => orchestrator2.onProgress(event);
       onProcessEnd2 = (exitCode, output) => orchestrator2.onProcessEnd(exitCode, output);
       session2.ensure();
@@ -388,6 +394,7 @@ describe('統合テスト: コンポーネント配線', () => {
         session: session2,
         claudeProcess: claudeProcess2,
         threadId: 'thread-2',
+        setAuthorId: (authorId) => notifier2.setAuthorId(authorId),
       });
 
       // スレッド1にメッセージ送信

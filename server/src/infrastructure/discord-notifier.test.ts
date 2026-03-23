@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { SendOptions, ThreadSender } from './discord-notifier.js';
+import type { SendOptions, ThreadSender, Notifier } from './discord-notifier.js';
 import { createNotifier } from './discord-notifier.js';
-import type { UsageInfo } from '../domain/types.js';
+import type { NotifyFn, UsageInfo } from '../domain/types.js';
 
 // --- モック用ヘルパー ---
 
@@ -51,7 +51,7 @@ describe('createNotifier', () => {
   describe('progress 通知', () => {
     it('started イベントをプレーンテキストで送信する', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'progress', event: { kind: 'started' } });
 
@@ -62,7 +62,7 @@ describe('createNotifier', () => {
 
     it('ツール使用イベントをプレーンテキストで送信する', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({
         type: 'progress',
@@ -77,7 +77,7 @@ describe('createNotifier', () => {
 
     it('拡張思考イベントをプレーンテキストで送信する', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'progress', event: { kind: 'thinking', text: 'コードを分析中...' } });
 
@@ -92,7 +92,7 @@ describe('createNotifier', () => {
   describe('info 通知', () => {
     it('プレーンテキストで送信する', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'info', message: 'セッションを開始しました' });
 
@@ -107,7 +107,7 @@ describe('createNotifier', () => {
   describe('result + usage 通知', () => {
     it('result は usage が来るまでバッファされる', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'result', text: 'テストを追加しました' });
 
@@ -116,7 +116,7 @@ describe('createNotifier', () => {
 
     it('usage 到着時に result を緑色 Embed で送信する', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'result', text: 'テストを追加しました' });
       notify({ type: 'usage', usage: usageEmpty });
@@ -130,7 +130,7 @@ describe('createNotifier', () => {
 
     it('usage データがある場合はフッターに含まれる', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'result', text: '完了' });
       notify({ type: 'usage', usage: usageWithData });
@@ -142,7 +142,7 @@ describe('createNotifier', () => {
 
     it('Sonnet 利用状況がフッターに含まれる', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'result', text: '完了' });
       notify({ type: 'usage', usage: usageWithSonnet });
@@ -154,7 +154,7 @@ describe('createNotifier', () => {
 
     it('usage データがない場合はフッターなし', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'result', text: '完了' });
       notify({ type: 'usage', usage: usageEmpty });
@@ -165,7 +165,7 @@ describe('createNotifier', () => {
 
     it('4096 文字超の result（usage データなし）はプレーンテキスト分割 + 空 Embed', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       const longText = 'A'.repeat(5000);
       notify({ type: 'result', text: longText });
@@ -181,7 +181,7 @@ describe('createNotifier', () => {
 
     it('4096 文字超の result はプレーンテキスト分割 + フッター Embed', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       const longText = 'A'.repeat(5000);
       notify({ type: 'result', text: longText });
@@ -205,7 +205,7 @@ describe('createNotifier', () => {
   describe('error + usage 通知', () => {
     it('error は usage が来るまでバッファされる', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'error', message: 'spawn failed', exitCode: 1 });
 
@@ -214,7 +214,7 @@ describe('createNotifier', () => {
 
     it('usage 到着時に error を赤色 Embed で送信する', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'error', message: 'spawn failed', exitCode: 1 });
       notify({ type: 'usage', usage: usageEmpty });
@@ -229,7 +229,7 @@ describe('createNotifier', () => {
 
     it('error にも usage フッターが付く', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'error', message: 'failed', exitCode: 2 });
       notify({ type: 'usage', usage: usageWithData });
@@ -244,7 +244,7 @@ describe('createNotifier', () => {
   describe('usage のみ', () => {
     it('バッファされた result がない場合、usage データがあれば Embed で送信する', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'usage', usage: usageWithData });
 
@@ -256,7 +256,7 @@ describe('createNotifier', () => {
 
     it('バッファされた result がなく usage データもない場合は何も送信しない', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'usage', usage: usageEmpty });
 
@@ -269,7 +269,7 @@ describe('createNotifier', () => {
   describe('複合シナリオ', () => {
     it('progress → result → usage の完全フロー', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'progress', event: { kind: 'started' } });
       notify({ type: 'progress', event: { kind: 'tool_use', toolName: 'Edit', target: 'a.ts' } });
@@ -288,7 +288,7 @@ describe('createNotifier', () => {
 
     it('progress → error → usage の完全フロー', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'progress', event: { kind: 'started' } });
       notify({ type: 'error', message: 'command failed', exitCode: 1 });
@@ -307,7 +307,7 @@ describe('createNotifier', () => {
   describe('error + usage フッターなし', () => {
     it('error 通知で usage データなしの場合もフッターなし', () => {
       const { thread, sent } = createMockThread();
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'error', message: 'failed', exitCode: 2 });
       notify({ type: 'usage', usage: usageEmpty });
@@ -315,6 +315,76 @@ describe('createNotifier', () => {
       const options = sent[0].content as SendOptions;
       expect(options.embeds[0].color).toBe(0xff1744);
       expect(options.embeds[0].footer).toBeUndefined();
+    });
+  });
+
+  // ----- メンション -----
+
+  describe('メンション', () => {
+    it('progress (started / tool_use / thinking) にはメンションが付かない', () => {
+      const { thread, sent } = createMockThread();
+      const notifier = createNotifier(thread);
+      notifier.setAuthorId('user123');
+
+      notifier.notify({ type: 'progress', event: { kind: 'started' } });
+      notifier.notify({ type: 'progress', event: { kind: 'tool_use', toolName: 'Edit', target: 'a.ts' } });
+      notifier.notify({ type: 'progress', event: { kind: 'thinking', text: '考え中' } });
+
+      for (const item of sent) {
+        expect(item.content).not.toContain('<@user123>');
+      }
+    });
+
+    it('result の Embed 送信時に content でメンションが付く', () => {
+      const { thread, sent } = createMockThread();
+      const notifier = createNotifier(thread);
+      notifier.setAuthorId('user456');
+
+      notifier.notify({ type: 'result', text: '完了' });
+      notifier.notify({ type: 'usage', usage: usageEmpty });
+
+      expect(sent).toHaveLength(1);
+      const options = sent[0].content as SendOptions;
+      expect(options.content).toBe('<@user456>');
+      expect(options.embeds[0].description).toBe('完了');
+    });
+
+    it('error の Embed 送信時に content でメンションが付く', () => {
+      const { thread, sent } = createMockThread();
+      const notifier = createNotifier(thread);
+      notifier.setAuthorId('user789');
+
+      notifier.notify({ type: 'error', message: 'failed', exitCode: 1 });
+      notifier.notify({ type: 'usage', usage: usageEmpty });
+
+      const options = sent[0].content as SendOptions;
+      expect(options.content).toBe('<@user789>');
+    });
+
+    it('長文分割時は最初のメッセージにのみメンションが付く', () => {
+      const { thread, sent } = createMockThread();
+      const notifier = createNotifier(thread);
+      notifier.setAuthorId('user123');
+
+      const longText = 'A'.repeat(5000);
+      notifier.notify({ type: 'result', text: longText });
+      notifier.notify({ type: 'usage', usage: usageEmpty });
+
+      // 最初のチャンクにメンション付き
+      expect(sent[0].type).toBe('text');
+      expect((sent[0].content as string).startsWith('<@user123> ')).toBe(true);
+      // 2番目以降にはメンションなし
+      expect((sent[1].content as string).startsWith('<@')).toBe(false);
+    });
+
+    it('info にはメンションが付かない', () => {
+      const { thread, sent } = createMockThread();
+      const notifier = createNotifier(thread);
+      notifier.setAuthorId('user123');
+
+      notifier.notify({ type: 'info', message: 'セッション開始' });
+
+      expect(sent[0].content).toBe('セッション開始');
     });
   });
 
@@ -326,7 +396,7 @@ describe('createNotifier', () => {
         send: vi.fn(() => Promise.reject(new Error('network error'))),
         setName: vi.fn(() => Promise.resolve()),
       };
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       expect(() => notify({ type: 'info', message: 'test' })).not.toThrow();
     });
@@ -336,7 +406,7 @@ describe('createNotifier', () => {
         send: vi.fn(() => Promise.reject(new Error('network error'))),
         setName: vi.fn(() => Promise.resolve()),
       };
-      const notify = createNotifier(thread);
+      const { notify } = createNotifier(thread);
 
       notify({ type: 'result', text: '完了' });
       expect(() => notify({ type: 'usage', usage: usageEmpty })).not.toThrow();

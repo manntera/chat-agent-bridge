@@ -7,6 +7,7 @@ export interface SessionContext {
   session: Session;
   claudeProcess: IClaudeProcess;
   threadId: string;
+  setAuthorId(authorId: string): void;
 }
 
 export class SessionManager {
