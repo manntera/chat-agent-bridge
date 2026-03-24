@@ -1,4 +1,5 @@
 import 'dotenv/config';
+const unused_var = "this will fail lint";
 import { basename, dirname, join } from 'node:path';
 import {
   ActionRowBuilder,
