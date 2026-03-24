@@ -137,6 +137,16 @@ describe('readSession', () => {
     expect(entries).toEqual([]);
   });
 
+  it('assistant の content が全てスキップ対象の場合はエントリに含まれない', async () => {
+    const readSession = await importReadSession();
+    const lines = [assistantLine([{ type: 'image', url: 'http://example.com' }])];
+    await writeFile(join(tempDir, 'test-session.jsonl'), lines.join('\n'));
+
+    const entries = await readSession('test-session', '/work');
+
+    expect(entries).toEqual([]);
+  });
+
   it('text でも tool_use でもない配列要素はスキップされる', async () => {
     const readSession = await importReadSession();
     const lines = [

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, mkdirSync, chmodSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WorkspaceStore, listDirectories } from './workspace-store.js';
@@ -166,5 +166,17 @@ describe('listDirectories', () => {
 
   it('空ディレクトリでは空配列を返す', () => {
     expect(listDirectories(tempDir)).toEqual([]);
+  });
+
+  it('readdirSync が例外を投げた場合は空配列を返す', () => {
+    // パーミッションを除去して readdirSync を失敗させる
+    const noReadDir = join(tempDir, 'no-read');
+    mkdirSync(noReadDir);
+    chmodSync(noReadDir, 0o000);
+
+    expect(listDirectories(noReadDir)).toEqual([]);
+
+    // 後片付けのためパーミッションを戻す
+    chmodSync(noReadDir, 0o755);
   });
 });

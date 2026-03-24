@@ -90,8 +90,7 @@ export class Orchestrator {
   }
 
   private formatSessionId(): string {
-    const id = this.session.sessionId;
-    return id ? id.slice(0, 8) : '';
+    return this.session.sessionId!.slice(0, 8);
   }
 
   private formatNewSessionMessage(): string {

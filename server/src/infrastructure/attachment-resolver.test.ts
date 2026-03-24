@@ -103,6 +103,13 @@ describe('resolvePrompt', () => {
       expect(result.prompt).toBe('text');
     });
 
+    it('content 空 + fetchFn が空文字を返す → prompt は null', async () => {
+      const emptyFetch = vi.fn(() => Promise.resolve(''));
+      const result = await resolvePrompt('', [textAttachment()], emptyFetch);
+
+      expect(result).toEqual({ prompt: null, error: null });
+    });
+
     it('非テキスト添付は無視される', async () => {
       const result = await resolvePrompt('hello', [imageAttachment()], mockFetch);
 
