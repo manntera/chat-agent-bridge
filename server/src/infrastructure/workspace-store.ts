@@ -1,5 +1,5 @@
 import { readFileSync, writeFileSync, existsSync, statSync, readdirSync } from 'node:fs';
-import { isAbsolute, join } from 'node:path';
+import { isAbsolute } from 'node:path';
 
 export interface Workspace {
   name: string;

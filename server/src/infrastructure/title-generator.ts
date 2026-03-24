@@ -1,4 +1,5 @@
 import { readSession, formatForTitleGeneration } from './session-reader.js';
+import { fetchWithRetry } from './fetch-with-retry.js';
 
 const TITLE_PROMPT = `\
 以下はAIコーディングアシスタントとユーザーの会話履歴です。
@@ -45,7 +46,7 @@ export class TitleGenerator implements ITitleGenerator {
       const controller = new AbortController();
       const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-      const res = await fetch(
+      const res = await fetchWithRetry(
         `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-lite:generateContent?key=${this.apiKey}`,
         {
           method: 'POST',

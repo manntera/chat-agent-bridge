@@ -51,7 +51,13 @@ function createTestContext() {
     const notify = (n: Notification) => notifications.push(n);
     const orchestrator = new Orchestrator(session, mockProcess, notify);
     session.ensure();
-    const ctx = { orchestrator, session, claudeProcess: mockProcess, threadId, setAuthorId: () => {} };
+    const ctx = {
+      orchestrator,
+      session,
+      claudeProcess: mockProcess,
+      threadId,
+      setAuthorId: () => {},
+    };
     sessionManager.register(threadId, ctx);
     return { orchestrator, session, mockProcess, notifications };
   }

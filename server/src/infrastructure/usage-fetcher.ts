@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import type { IUsageFetcher, UsageInfo } from '../domain/types.js';
+import { fetchWithRetry } from './fetch-with-retry.js';
 
 const CREDENTIALS_PATH = join(homedir(), '.claude', '.credentials.json');
 const USAGE_API_URL = 'https://api.anthropic.com/api/oauth/usage';
@@ -30,7 +31,7 @@ async function readAccessToken(): Promise<string> {
 export class UsageFetcher implements IUsageFetcher {
   async fetch(): Promise<UsageInfo> {
     const token = await readAccessToken();
-    const res = await fetch(USAGE_API_URL, {
+    const res = await fetchWithRetry(USAGE_API_URL, {
       headers: {
         Authorization: `Bearer ${token}`,
         'anthropic-beta': 'oauth-2025-04-20',

@@ -263,7 +263,9 @@ async function main(): Promise<void> {
       const selectedSessionId = rawValue.slice(sepIdx + 1);
       const workspace = workspaceStore.findByName(wsName);
 
-      log(`セッション選択: ${interaction.user.username} [${wsName}] ${selectedSessionId.slice(0, 8)}...`);
+      log(
+        `セッション選択: ${interaction.user.username} [${wsName}] ${selectedSessionId.slice(0, 8)}...`,
+      );
 
       if (!workspace) {
         await interaction.update({
@@ -282,7 +284,9 @@ async function main(): Promise<void> {
         const ctx = createSession(thread.id, thread, workspace);
         ctx.session.restore(selectedSessionId);
 
-        await thread.send(`セッションを再開しました [\`${selectedSessionId.slice(0, 8)}\`] — 📁 ${workspace.name}`);
+        await thread.send(
+          `セッションを再開しました [\`${selectedSessionId.slice(0, 8)}\`] — 📁 ${workspace.name}`,
+        );
 
         await interaction.update({
           content: `セッション \`${selectedSessionId.slice(0, 8)}...\` を再開しました → <#${thread.id}>`,
@@ -360,7 +364,11 @@ async function main(): Promise<void> {
       const state = browsingState.get(interaction.user.id);
 
       if (!state) {
-        await interaction.update({ content: 'ブラウズセッションが期限切れです。再度 `/cc workspace add` を実行してください。', components: [] });
+        await interaction.update({
+          content:
+            'ブラウズセッションが期限切れです。再度 `/cc workspace add` を実行してください。',
+          components: [],
+        });
         return;
       }
 
@@ -409,7 +417,9 @@ async function main(): Promise<void> {
 
     const subcommandGroup = interaction.options.getSubcommandGroup(false);
     const subcommand = interaction.options.getSubcommand();
-    log(`コマンド受信: ${interaction.user.username} /cc ${subcommandGroup ? subcommandGroup + ' ' : ''}${subcommand}`);
+    log(
+      `コマンド受信: ${interaction.user.username} /cc ${subcommandGroup ? subcommandGroup + ' ' : ''}${subcommand}`,
+    );
 
     // アクセス制御
     // スレッド内のコマンドは親チャンネルIDでチェックする
@@ -529,7 +539,8 @@ async function main(): Promise<void> {
       // ワークスペースが 0 件
       if (workspaces.length === 0) {
         await interaction.reply({
-          content: '⚠️ ワークスペースが登録されていません。`/cc workspace add` で登録してください。',
+          content:
+            '⚠️ ワークスペースが登録されていません。`/cc workspace add` で登録してください。',
           ephemeral: true,
         });
         return;
@@ -664,7 +675,10 @@ async function main(): Promise<void> {
 
         // 全ワークスペースからセッションを収集
         const workspaces = workspaceStore.list();
-        const allSessions: Array<{ workspace: Workspace; sessions: Awaited<ReturnType<typeof sessionStore.listSessionsByDateRange>> }> = [];
+        const allSessions: Array<{
+          workspace: Workspace;
+          sessions: Awaited<ReturnType<typeof sessionStore.listSessionsByDateRange>>;
+        }> = [];
         for (const ws of workspaces) {
           const sessions = await sessionStore.listSessionsByDateRange(ws.path, from, to);
           if (sessions.length > 0) {
@@ -744,12 +758,20 @@ async function main(): Promise<void> {
         const workspaces = workspaceStore.list();
 
         if (workspaces.length === 0) {
-          await interaction.editReply('⚠️ ワークスペースが登録されていません。`/cc workspace add` で登録してください。');
+          await interaction.editReply(
+            '⚠️ ワークスペースが登録されていません。`/cc workspace add` で登録してください。',
+          );
           return;
         }
 
         // 全ワークスペースからセッションを収集
-        type SessionWithWorkspace = { workspace: Workspace; sessionId: string; firstUserMessage: string; slug: string | null; lastModified: Date };
+        type SessionWithWorkspace = {
+          workspace: Workspace;
+          sessionId: string;
+          firstUserMessage: string;
+          slug: string | null;
+          lastModified: Date;
+        };
         const allSessions: SessionWithWorkspace[] = [];
         for (const ws of workspaces) {
           const sessions = await sessionStore.listSessions(ws.path);

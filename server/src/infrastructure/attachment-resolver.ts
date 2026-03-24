@@ -18,10 +18,12 @@ function isTextAttachment(attachment: Attachment): boolean {
   return false;
 }
 
+import { fetchWithRetry } from './fetch-with-retry.js';
+
 export type FetchFn = (url: string) => Promise<string>;
 
 async function defaultFetch(url: string): Promise<string> {
-  const response = await fetch(url);
+  const response = await fetchWithRetry(url);
   if (!response.ok) {
     throw new Error(`HTTP ${response.status}`);
   }

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
-import type { SendOptions, ThreadSender, Notifier } from './discord-notifier.js';
+import type { SendOptions, ThreadSender } from './discord-notifier.js';
 import { createNotifier } from './discord-notifier.js';
-import type { NotifyFn, UsageInfo } from '../domain/types.js';
+import type { UsageInfo } from '../domain/types.js';
 
 // --- モック用ヘルパー ---
 
@@ -327,7 +327,10 @@ describe('createNotifier', () => {
       notifier.setAuthorId('user123');
 
       notifier.notify({ type: 'progress', event: { kind: 'started' } });
-      notifier.notify({ type: 'progress', event: { kind: 'tool_use', toolName: 'Edit', target: 'a.ts' } });
+      notifier.notify({
+        type: 'progress',
+        event: { kind: 'tool_use', toolName: 'Edit', target: 'a.ts' },
+      });
       notifier.notify({ type: 'progress', event: { kind: 'thinking', text: '考え中' } });
 
       for (const item of sent) {

@@ -1,4 +1,5 @@
 import type { ConversationEntry } from './session-reader.js';
+import { fetchWithRetry } from './fetch-with-retry.js';
 
 // ============================================================
 // Pass 1: セッションごとの個別要約
@@ -127,7 +128,7 @@ export class ReportGenerator implements IReportGenerator {
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
     try {
-      const res = await fetch(
+      const res = await fetchWithRetry(
         `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${this.apiKey}`,
         {
           method: 'POST',

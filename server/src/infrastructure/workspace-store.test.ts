@@ -58,7 +58,9 @@ describe('WorkspaceStore', () => {
   it('同名のワークスペースを追加するとエラー', () => {
     const store = new WorkspaceStore(filePath);
     store.add({ name: 'project-a', path: existingDir1 });
-    expect(() => store.add({ name: 'project-a', path: existingDir2 })).toThrow('既に登録されています');
+    expect(() => store.add({ name: 'project-a', path: existingDir2 })).toThrow(
+      '既に登録されています',
+    );
   });
 
   it('findByName() で名前からワークスペースを検索できる', () => {

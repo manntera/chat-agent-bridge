@@ -53,10 +53,16 @@ export const ccCommand = new SlashCommandBuilder()
           .setName('add')
           .setDescription('ワークスペースを登録します（省略時はディレクトリを参照して選択）')
           .addStringOption((opt) =>
-            opt.setName('name').setDescription('ワークスペース名（省略時はディレクトリ名）').setRequired(false),
+            opt
+              .setName('name')
+              .setDescription('ワークスペース名（省略時はディレクトリ名）')
+              .setRequired(false),
           )
           .addStringOption((opt) =>
-            opt.setName('path').setDescription('作業ディレクトリの絶対パス（省略時はブラウズ選択）').setRequired(false),
+            opt
+              .setName('path')
+              .setDescription('作業ディレクトリの絶対パス（省略時はブラウズ選択）')
+              .setRequired(false),
           ),
       )
       .addSubcommand((sub) =>
@@ -67,7 +73,5 @@ export const ccCommand = new SlashCommandBuilder()
             opt.setName('name').setDescription('ワークスペース名').setRequired(true),
           ),
       )
-      .addSubcommand((sub) =>
-        sub.setName('list').setDescription('ワークスペース一覧を表示します'),
-      ),
+      .addSubcommand((sub) => sub.setName('list').setDescription('ワークスペース一覧を表示します')),
   );

@@ -175,6 +175,7 @@ describe('resolvePrompt', () => {
       expect(result.prompt).toBe('指示\n\nダウンロード結果');
       expect(mockGlobalFetch).toHaveBeenCalledWith(
         'https://cdn.discord.com/attachments/123/message.txt',
+        undefined,
       );
 
       vi.unstubAllGlobals();
