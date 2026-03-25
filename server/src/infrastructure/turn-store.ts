@@ -9,7 +9,12 @@ function turnsFilePath(sessionId: string, workDir: string): string {
 }
 
 export class TurnStore {
-  /** ターンを記録する */
+  /**
+   * ターンを記録する。
+   * 注意: read-modify-write のため、同一セッションに対する並行呼び出しは
+   * データ消失の原因になる。現在の利用では 1 スレッド = 1 セッションで
+   * 応答はシーケンシャルなため問題ないが、並行化する場合は直列化が必要。
+   */
   async record(
     sessionId: string,
     workDir: string,
