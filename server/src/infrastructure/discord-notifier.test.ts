@@ -449,5 +449,15 @@ describe('createNotifier', () => {
       notify({ type: 'result', text: '完了' });
       expect(() => notify({ type: 'usage', usage: usageEmpty })).not.toThrow();
     });
+
+    it('progress の embed send が失敗してもエラーを投げない', () => {
+      const thread: ThreadSender = {
+        send: vi.fn(() => Promise.reject(new Error('network error'))),
+        setName: vi.fn(() => Promise.resolve()),
+      };
+      const { notify } = createNotifier(thread);
+
+      expect(() => notify({ type: 'progress', event: { kind: 'started' } })).not.toThrow();
+    });
   });
 });

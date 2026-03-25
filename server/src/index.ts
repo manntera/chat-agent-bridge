@@ -28,6 +28,8 @@ import type { DailySession } from './infrastructure/report-generator.js';
 import { readSession } from './infrastructure/session-reader.js';
 import { getDayBoundary } from './infrastructure/session-store.js';
 import { UsageFetcher } from './infrastructure/usage-fetcher.js';
+import { SessionRestorer } from './infrastructure/session-restorer.js';
+import { ThreadMappingStore } from './infrastructure/thread-mapping-store.js';
 import { WorkspaceStore, listDirectories } from './infrastructure/workspace-store.js';
 import {
   formatRelativeDate,
@@ -44,6 +46,10 @@ async function main(): Promise<void> {
   // ワークスペース初期化
   const workspaceStore = new WorkspaceStore(config.workspacesFile);
   log(`ワークスペース: ${workspaceStore.list().length} 件登録済み`);
+
+  // スレッド→セッションマッピングの永続化
+  const threadMappingStore = new ThreadMappingStore(config.threadSessionsFile);
+  log('スレッドセッションマッピングを読み込みました');
 
   const client = new Client({
     intents: [
@@ -134,6 +140,26 @@ async function main(): Promise<void> {
     return ctx;
   }
 
+  const sessionRestorer = new SessionRestorer({
+    threadMappingStore,
+    sessionManager,
+    createSession,
+    log,
+  });
+
+  /** マッピングをディスクに永続化する */
+  function persistMapping(
+    threadId: string,
+    sessionId: string,
+    workspace: Workspace,
+  ): Promise<void> {
+    return threadMappingStore.set(threadId, {
+      sessionId,
+      workDir: workspace.path,
+      workspaceName: workspace.name,
+    });
+  }
+
   // App 層
   const handleMessage = createMessageHandler(accessControl, sessionManager);
 
@@ -160,20 +186,23 @@ async function main(): Promise<void> {
     }));
     const { prompt, error } = await resolvePrompt(msg.content, attachments);
 
-    if (error) {
-      const ctx = sessionManager.get(msg.channelId);
-      if (ctx) {
-        msg.channel.send(error).catch((err) => console.error('Discord send error:', err));
-      }
-    }
-
     if (prompt === null) return;
 
     log(
       `メッセージ受信: ${msg.author.username} "${prompt.slice(0, 100)}${prompt.length > 100 ? '...' : ''}" (thread: ${msg.channelId})`,
     );
 
-    const ctx = sessionManager.get(msg.channelId);
+    let ctx = sessionManager.get(msg.channelId);
+
+    // セッションが見つからない場合、ディスクから遅延復元を試みる
+    if (!ctx) {
+      ctx = await sessionRestorer.tryRestore(msg.channelId, msg.channel as ThreadSender);
+    }
+
+    if (error && ctx) {
+      msg.channel.send(error).catch((err) => console.error('Discord send error:', err));
+    }
+
     if (ctx) {
       ctx.setAuthorId(msg.author.id);
     }
@@ -284,6 +313,8 @@ async function main(): Promise<void> {
         const ctx = createSession(thread.id, thread, workspace);
         ctx.session.restore(selectedSessionId);
 
+        await persistMapping(thread.id, selectedSessionId, workspace);
+
         await thread.send(
           `セッションを再開しました [\`${selectedSessionId.slice(0, 8)}\`] — 📁 ${workspace.name}`,
         );
@@ -337,6 +368,8 @@ async function main(): Promise<void> {
         const ctx = createSession(thread.id, thread, workspace);
         ctx.session.reset();
         ctx.session.ensure(opts);
+
+        await persistMapping(thread.id, ctx.session.sessionId!, workspace);
 
         await thread.send(
           `セッションを開始しました [\`${ctx.session.sessionId!.slice(0, 8)}\`] — 📁 ${workspace.name}${suffix}`,
@@ -590,6 +623,8 @@ async function main(): Promise<void> {
         // createSession 内で新しい Session を作るが、options を引き継ぐために上書き
         ctx.session.reset();
         ctx.session.ensure(command.options);
+
+        await persistMapping(thread.id, ctx.session.sessionId!, workspace);
 
         await thread.send(
           `セッションを開始しました [\`${ctx.session.sessionId!.slice(0, 8)}\`] — 📁 ${workspace.name}${suffix}`,
