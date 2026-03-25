@@ -71,7 +71,9 @@ export class TurnStore {
     try {
       const data = await readFile(filePath, 'utf-8');
       return JSON.parse(data) as TurnMap;
-    } catch {
+    } catch (err: unknown) {
+      if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {};
+      console.error('TurnStore: corrupt or unreadable turns file:', filePath, err);
       return {};
     }
   }
