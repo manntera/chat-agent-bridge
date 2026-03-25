@@ -592,6 +592,7 @@ describe('createNotifier', () => {
     it('progress の embed send が失敗してもエラーを投げない', () => {
       const thread: ThreadSender = {
         send: vi.fn(() => Promise.reject(new Error('network error'))),
+        sendTyping: vi.fn(() => Promise.resolve()),
         setName: vi.fn(() => Promise.resolve()),
       };
       const { notify } = createNotifier(thread);
