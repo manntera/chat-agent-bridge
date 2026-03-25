@@ -52,7 +52,7 @@ function createIntegrationContext() {
     send: vi.fn((content: string | SendOptions) => {
       const type = typeof content === 'string' ? 'text' : 'embed';
       sent.push({ type, content });
-      return Promise.resolve({ id: '' });
+      return Promise.resolve();
     }),
     sendTyping: vi.fn(() => Promise.resolve()),
     setName: vi.fn(() => Promise.resolve()),
@@ -371,7 +371,7 @@ describe('統合テスト: コンポーネント配線', () => {
       const mockThread2: ThreadSender = {
         send: vi.fn((content: string | SendOptions) => {
           sent2.push({ type: typeof content === 'string' ? 'text' : 'embed', content });
-          return Promise.resolve({ id: '' });
+          return Promise.resolve();
         }),
         sendTyping: vi.fn(() => Promise.resolve()),
         setName: vi.fn(() => Promise.resolve()),

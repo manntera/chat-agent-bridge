@@ -22,29 +22,45 @@ export class SessionBrancher {
     let turnCount = 0;
     let cutIndex = 0;
 
-    for (let i = 0; i < lines.length; i++) {
-      try {
-        const parsed = JSON.parse(lines[i]);
-        if (parsed.type === 'assistant') {
-          turnCount++;
-          if (turnCount === targetTurn) {
-            cutIndex = i + 1;
+    if (targetTurn === 0) {
+      // Turn 0: メタデータ行（user/assistant 以外）のみ保持
+      for (let i = 0; i < lines.length; i++) {
+        try {
+          const parsed = JSON.parse(lines[i]);
+          if (parsed.type === 'user' || parsed.type === 'assistant') {
+            cutIndex = i;
             break;
           }
+        } catch {
+          // パース不能行はそのままコピー
         }
-      } catch {
-        // パース不能行はターンカウントに影響しない（そのままコピー）
       }
-    }
+      if (cutIndex === 0) cutIndex = 0; // メタデータがない場合も空で作成
+    } else {
+      for (let i = 0; i < lines.length; i++) {
+        try {
+          const parsed = JSON.parse(lines[i]);
+          if (parsed.type === 'assistant') {
+            turnCount++;
+            if (turnCount === targetTurn) {
+              cutIndex = i + 1;
+              break;
+            }
+          }
+        } catch {
+          // パース不能行はターンカウントに影響しない（そのままコピー）
+        }
+      }
 
-    if (cutIndex === 0) {
-      throw new Error(`Turn ${targetTurn} が見つかりません（全 ${turnCount} ターン）`);
+      if (cutIndex === 0) {
+        throw new Error(`Turn ${targetTurn} が見つかりません（全 ${turnCount} ターン）`);
+      }
     }
 
     const newSessionId = randomUUID();
     const newLines = lines.slice(0, cutIndex);
     const newPath = join(dir, `${newSessionId}.jsonl`);
-    await writeFile(newPath, newLines.join('\n') + '\n');
+    await writeFile(newPath, newLines.length > 0 ? newLines.join('\n') + '\n' : '');
 
     // turns.json もコピー
     await this.turnStore.copyTo(sessionId, newSessionId, workDir, targetTurn);

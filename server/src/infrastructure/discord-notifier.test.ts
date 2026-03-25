@@ -10,16 +10,13 @@ interface SentItem {
   content: string | SendOptions;
 }
 
-let msgIdCounter = 0;
-
 function createMockThread() {
-  msgIdCounter = 0;
   const sent: SentItem[] = [];
   const thread: ThreadSender = {
     send: vi.fn((content: string | SendOptions) => {
       const type = typeof content === 'string' ? 'text' : 'embed';
       sent.push({ type, content });
-      return Promise.resolve({ id: `msg-${++msgIdCounter}` });
+      return Promise.resolve();
     }),
     sendTyping: vi.fn(() => Promise.resolve()),
     setName: vi.fn(() => Promise.resolve()),
@@ -565,7 +562,7 @@ describe('createNotifier', () => {
     it('sendTyping のエラーは catch され console.error に出力される', async () => {
       const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const thread: ThreadSender = {
-        send: vi.fn(() => Promise.resolve({ id: '' })),
+        send: vi.fn(() => Promise.resolve()),
         sendTyping: vi.fn(() => Promise.reject(new Error('typing error'))),
         setName: vi.fn(() => Promise.resolve()),
       };
@@ -579,87 +576,12 @@ describe('createNotifier', () => {
     });
   });
 
-  // ----- onResultSent コールバック -----
-
-  describe('onResultSent コールバック', () => {
-    it('result 送信時に onResultSent コールバックが呼ばれる', async () => {
-      const { thread } = createMockThread();
-      const notifier = createNotifier(thread);
-      const callback = vi.fn();
-      notifier.onResultSent = callback;
-
-      notifier.notify({ type: 'result', text: '完了' });
-      notifier.notify({ type: 'usage', usage: usageEmpty });
-
-      // コールバックは非同期で呼ばれるため待機
-      await vi.waitFor(() => {
-        expect(callback).toHaveBeenCalledWith('msg-1');
-      });
-    });
-
-    it('onResultSent が null の場合でもエラーにならない', () => {
-      const { thread } = createMockThread();
-      const notifier = createNotifier(thread);
-      notifier.onResultSent = null;
-
-      notifier.notify({ type: 'result', text: '完了' });
-      expect(() => notifier.notify({ type: 'usage', usage: usageEmpty })).not.toThrow();
-    });
-
-    it('長文分割時は最初のメッセージの ID のみ通知される', async () => {
-      const { thread } = createMockThread();
-      const notifier = createNotifier(thread);
-      const callback = vi.fn();
-      notifier.onResultSent = callback;
-
-      const longText = 'A'.repeat(5000);
-      notifier.notify({ type: 'result', text: longText });
-      notifier.notify({ type: 'usage', usage: usageEmpty });
-
-      await vi.waitFor(() => {
-        expect(callback).toHaveBeenCalledTimes(1);
-      });
-      expect(callback).toHaveBeenCalledWith('msg-1');
-    });
-
-    it('非同期コールバック（Promise を返す）が正しく await される', async () => {
-      const { thread } = createMockThread();
-      const notifier = createNotifier(thread);
-      const order: string[] = [];
-      notifier.onResultSent = async (msgId) => {
-        await new Promise((r) => setTimeout(r, 10));
-        order.push(`recorded:${msgId}`);
-      };
-
-      notifier.notify({ type: 'result', text: '完了' });
-      notifier.notify({ type: 'usage', usage: usageEmpty });
-
-      await vi.waitFor(() => {
-        expect(order).toEqual(['recorded:msg-1']);
-      });
-    });
-
-    it('error 送信時は onResultSent が呼ばれない', async () => {
-      const { thread } = createMockThread();
-      const notifier = createNotifier(thread);
-      const callback = vi.fn();
-      notifier.onResultSent = callback;
-
-      notifier.notify({ type: 'error', message: 'failed', exitCode: 1 });
-      notifier.notify({ type: 'usage', usage: usageEmpty });
-
-      // 少し待ってコールバックが呼ばれていないことを確認
-      await new Promise((r) => setTimeout(r, 50));
-      expect(callback).not.toHaveBeenCalled();
-    });
-  });
-
   // ----- 送信エラー -----
 
   describe('送信エラー', () => {
     it('テキスト send が失敗してもエラーを投げない', () => {
       const thread: ThreadSender = {
-        send: vi.fn(() => Promise.reject(new Error('network error'))) as ThreadSender['send'],
+        send: vi.fn(() => Promise.reject(new Error('network error'))),
         sendTyping: vi.fn(() => Promise.resolve()),
         setName: vi.fn(() => Promise.resolve()),
       };
@@ -670,7 +592,7 @@ describe('createNotifier', () => {
 
     it('embed send が失敗してもエラーを投げない', () => {
       const thread: ThreadSender = {
-        send: vi.fn(() => Promise.reject(new Error('network error'))) as ThreadSender['send'],
+        send: vi.fn(() => Promise.reject(new Error('network error'))),
         sendTyping: vi.fn(() => Promise.resolve()),
         setName: vi.fn(() => Promise.resolve()),
       };
@@ -682,7 +604,7 @@ describe('createNotifier', () => {
 
     it('progress の embed send が失敗してもエラーを投げない', () => {
       const thread: ThreadSender = {
-        send: vi.fn(() => Promise.reject(new Error('network error'))) as ThreadSender['send'],
+        send: vi.fn(() => Promise.reject(new Error('network error'))),
         sendTyping: vi.fn(() => Promise.resolve()),
         setName: vi.fn(() => Promise.resolve()),
       };

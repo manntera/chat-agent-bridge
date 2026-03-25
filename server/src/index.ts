@@ -112,14 +112,6 @@ async function main(): Promise<void> {
 
     const orchestrator = new Orchestrator(session, claudeProcess, notify, usageFetcher);
 
-    // ターン記録コールバックを設定
-    notifier.onResultSent = async (discordMessageId) => {
-      const sid = session.sessionId;
-      if (sid) {
-        await turnStore.record(sid, workspace.path, orchestrator.currentTurn, discordMessageId);
-      }
-    };
-
     onProgress = (event) => orchestrator.onProgress(event);
     onProcessEnd = (exitCode, output) => {
       log(`ClaudeProcess 終了 (exitCode: ${exitCode}, thread: ${threadId})`);
@@ -220,7 +212,7 @@ async function main(): Promise<void> {
       ctx.setAuthorId(msg.author.id);
     }
 
-    // リプライ検出（巻き戻し）
+    // リプライ検出（質問上書きによる巻き戻し）
     if (msg.reference?.messageId && ctx?.session.sessionId) {
       const referencedId = msg.reference.messageId;
 
@@ -237,11 +229,14 @@ async function main(): Promise<void> {
       }
 
       if (turn !== null) {
+        // リプライ先の質問の直前まで保持し、新しいプロンプトで上書き
+        const branchTurn = turn - 1;
+
         // busy/interrupting 時は branch せず通知のみ（Orchestrator 側で処理）
         if (ctx.orchestrator.state !== 'idle') {
           ctx.orchestrator.handleCommand({
             type: 'rewind',
-            targetTurn: turn,
+            targetTurn: branchTurn,
             newSessionId: '', // busy 時は Orchestrator が拒否するため使われない
             prompt,
           });
@@ -252,15 +247,15 @@ async function main(): Promise<void> {
           const newSessionId = await sessionBrancher.branch(
             sourceSessionId,
             ctx.session.workDir,
-            turn,
+            branchTurn,
           );
           log(
-            `巻き戻し: Turn ${turn} (元セッション: ${sourceSessionId.slice(0, 8)}) → 新セッション ${newSessionId.slice(0, 8)} (thread: ${msg.channelId})`,
+            `巻き戻し: Turn ${turn} を上書き (元セッション: ${sourceSessionId.slice(0, 8)}) → 新セッション ${newSessionId.slice(0, 8)} (thread: ${msg.channelId})`,
           );
 
           ctx.orchestrator.handleCommand({
             type: 'rewind',
-            targetTurn: turn,
+            targetTurn: branchTurn,
             newSessionId,
             prompt,
           });
@@ -287,6 +282,13 @@ async function main(): Promise<void> {
       threadId: msg.channelId,
       content: prompt,
     });
+
+    // ユーザーのメッセージ ID を記録（巻き戻し用）
+    if (ctx && prevState === 'idle' && ctx.orchestrator.state === 'busy') {
+      turnStore
+        .record(ctx.session.sessionId!, ctx.session.workDir, ctx.orchestrator.currentTurn, msg.id)
+        .catch((err) => console.error('Turn record error:', err));
+    }
 
     const newState = ctx?.orchestrator.state;
     if (prevState !== newState) {
