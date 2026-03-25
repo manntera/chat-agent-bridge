@@ -1,4 +1,5 @@
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 export interface Config {
   discordToken: string;
@@ -8,6 +9,7 @@ export interface Config {
   geminiApiKey: string | null;
   workspacesFile: string;
   workspaceBaseDir: string;
+  threadSessionsFile: string;
 }
 
 function requireEnv(name: string): string {
@@ -29,5 +31,7 @@ export function loadConfig(): Config {
     geminiApiKey: process.env.GEMINI_API_KEY || null,
     workspacesFile: process.env.WORKSPACES_FILE || 'workspaces.json',
     workspaceBaseDir: process.env.WORKSPACE_BASE_DIR || homedir(),
+    threadSessionsFile:
+      process.env.THREAD_SESSIONS_FILE || join(process.cwd(), 'thread-sessions.json'),
   };
 }

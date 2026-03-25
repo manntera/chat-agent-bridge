@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { loadConfig } from './config.js';
 
 describe('loadConfig', () => {
@@ -17,6 +18,11 @@ describe('loadConfig', () => {
     process.env.DISCORD_TOKEN = 'test-token';
     process.env.CHANNEL_ID = '123456789';
     process.env.ALLOWED_USER_IDS = '111,222,333';
+    // オプショナル環境変数をクリア（テスト環境の漏れ防止）
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.WORKSPACES_FILE;
+    delete process.env.WORKSPACE_BASE_DIR;
+    delete process.env.THREAD_SESSIONS_FILE;
   }
 
   // ----- 正常系 -----
@@ -35,6 +41,7 @@ describe('loadConfig', () => {
         geminiApiKey: null,
         workspacesFile: 'workspaces.json',
         workspaceBaseDir: homedir(),
+        threadSessionsFile: join(process.cwd(), 'thread-sessions.json'),
       });
     });
 
@@ -72,6 +79,28 @@ describe('loadConfig', () => {
       const config = loadConfig();
 
       expect(config.claudePath).toBe('claude');
+    });
+
+    it('WORKSPACES_FILE が設定されている場合はその値を使用', () => {
+      setValidEnv();
+      process.env.WORKSPACES_FILE = 'custom-workspaces.json';
+
+      const config = loadConfig();
+
+      expect(config.workspacesFile).toBe('custom-workspaces.json');
+    });
+
+    it('オプショナル環境変数が全て設定されている場合はその値を使用', () => {
+      setValidEnv();
+      process.env.GEMINI_API_KEY = 'test-gemini-key';
+      process.env.WORKSPACE_BASE_DIR = '/custom/base';
+      process.env.THREAD_SESSIONS_FILE = '/custom/thread-sessions.json';
+
+      const config = loadConfig();
+
+      expect(config.geminiApiKey).toBe('test-gemini-key');
+      expect(config.workspaceBaseDir).toBe('/custom/base');
+      expect(config.threadSessionsFile).toBe('/custom/thread-sessions.json');
     });
   });
 
