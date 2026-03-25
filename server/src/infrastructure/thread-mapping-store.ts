@@ -29,7 +29,11 @@ export class ThreadMappingStore {
     try {
       const raw = readFileSync(this.filePath, 'utf-8');
       const parsed: ThreadMappingsFile = JSON.parse(raw);
-      if (parsed.mappings && typeof parsed.mappings === 'object' && !Array.isArray(parsed.mappings)) {
+      if (
+        parsed.mappings &&
+        typeof parsed.mappings === 'object' &&
+        !Array.isArray(parsed.mappings)
+      ) {
         this.mappings = new Map(Object.entries(parsed.mappings));
       } else {
         console.warn(`thread-sessions.json の形式が不正です: ${this.filePath}`);
