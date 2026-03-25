@@ -559,7 +559,8 @@ describe('createNotifier', () => {
       expect(() => notifier.dispose()).not.toThrow();
     });
 
-    it('sendTyping のエラーは握りつぶされる', () => {
+    it('sendTyping のエラーは catch され console.error に出力される', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
       const thread: ThreadSender = {
         send: vi.fn(() => Promise.resolve()),
         sendTyping: vi.fn(() => Promise.reject(new Error('typing error'))),
@@ -568,6 +569,13 @@ describe('createNotifier', () => {
       const { notify } = createNotifier(thread);
 
       expect(() => notify({ type: 'progress', event: { kind: 'started' } })).not.toThrow();
+      await Promise.resolve(); // .catch() コールバックをフラッシュ
+
+      expect(errorSpy).toHaveBeenCalledWith(
+        'Discord sendTyping error:',
+        expect.any(Error),
+      );
+      errorSpy.mockRestore();
     });
   });
 
