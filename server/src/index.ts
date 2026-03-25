@@ -233,7 +233,9 @@ async function main(): Promise<void> {
 
       if (turn !== null) {
         if (ctx.orchestrator.state !== 'idle') {
-          ctx.orchestrator.handleCommand({ type: 'prompt', text: prompt });
+          msg.channel
+            .send('処理中のため巻き戻しできません。完了後に再度お試しください。')
+            .catch(() => {});
           return;
         }
 
