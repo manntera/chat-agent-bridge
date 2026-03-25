@@ -14,6 +14,7 @@ export interface SendOptions {
 
 export interface ThreadSender {
   send(content: string | SendOptions): Promise<unknown>;
+  sendTyping(): Promise<unknown>;
   setName(name: string): Promise<unknown>;
 }
 
@@ -74,13 +75,35 @@ export interface Notifier {
 export function createNotifier(thread: ThreadSender): Notifier {
   let pendingResult: PendingResult | null = null;
   let currentAuthorId: string | null = null;
+  let typingInterval: NodeJS.Timeout | null = null;
+  let isTyping = false;
 
   function mention(): string | null {
     return currentAuthorId ? `<@${currentAuthorId}>` : null;
   }
 
+  function fireTyping(): void {
+    thread.sendTyping().catch((err) => console.error('Discord sendTyping error:', err));
+  }
+
+  function startTyping(): void {
+    if (isTyping) return;
+    isTyping = true;
+    fireTyping();
+    typingInterval = setInterval(fireTyping, 8000);
+  }
+
+  function stopTyping(): void {
+    isTyping = false;
+    if (typingInterval) {
+      clearInterval(typingInterval);
+      typingInterval = null;
+    }
+  }
+
   function sendText(text: string): void {
     thread.send(text).catch((err) => console.error('Discord send error:', err));
+    if (isTyping) fireTyping();
   }
 
   function sendEmbed(embed: EmbedData, withMention = false): void {
@@ -88,6 +111,7 @@ export function createNotifier(thread: ThreadSender): Notifier {
     const opts: SendOptions = { embeds: [embed] };
     if (m) opts.content = m;
     thread.send(opts).catch((err) => console.error('Discord send error:', err));
+    if (isTyping) fireTyping();
   }
 
   function flush(usage: UsageInfo): void {
@@ -129,6 +153,7 @@ export function createNotifier(thread: ThreadSender): Notifier {
   const notify: NotifyFn = (notification: Notification) => {
     switch (notification.type) {
       case 'progress':
+        if (notification.event.kind === 'started') startTyping();
         sendEmbed({ color: COLOR_PROGRESS, description: formatProgress(notification) });
         break;
       case 'info':
@@ -145,6 +170,7 @@ export function createNotifier(thread: ThreadSender): Notifier {
         };
         break;
       case 'usage':
+        stopTyping();
         flush(notification.usage);
         break;
     }
