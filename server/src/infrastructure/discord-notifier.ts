@@ -59,7 +59,7 @@ type PendingResult =
 export interface Notifier {
   notify: NotifyFn;
   setAuthorId(authorId: string): void;
-  onResultSent: ((discordMessageId: string) => void) | null;
+  onResultSent: ((discordMessageId: string) => void | Promise<void>) | null;
   dispose(): void;
 }
 
@@ -80,7 +80,7 @@ export function createNotifier(thread: ThreadSender): Notifier {
   let currentAuthorId: string | null = null;
   let typingInterval: NodeJS.Timeout | null = null;
   let isTyping = false;
-  let resultSentCallback: ((discordMessageId: string) => void) | null = null;
+  let resultSentCallback: ((discordMessageId: string) => void | Promise<void>) | null = null;
 
   function mention(): string | null {
     return currentAuthorId ? `<@${currentAuthorId}>` : null;
@@ -152,12 +152,12 @@ export function createNotifier(thread: ThreadSender): Notifier {
       for (let i = 0; i < chunks.length; i++) {
         const text = i === 0 && mentionPrefix ? `${mentionPrefix}${chunks[i]}` : chunks[i];
         const p = sendText(text);
-        // 最初のメッセージの ID をコールバックで通知
+        // 最初のメッセージの ID をコールバックで通知（非同期コールバック対応）
         if (i === 0 && resultSentCallback) {
           const cb = resultSentCallback;
-          p.then((msg) => {
-            if (msg.id) cb(msg.id);
-          }).catch(() => {});
+          p.then(async (msg) => {
+            if (msg.id) await cb(msg.id);
+          }).catch((err) => console.error('onResultSent callback error:', err));
         }
       }
       if (footer) {
@@ -208,7 +208,7 @@ export function createNotifier(thread: ThreadSender): Notifier {
     get onResultSent() {
       return resultSentCallback;
     },
-    set onResultSent(cb: ((discordMessageId: string) => void) | null) {
+    set onResultSent(cb: ((discordMessageId: string) => void | Promise<void>) | null) {
       resultSentCallback = cb;
     },
     dispose() {

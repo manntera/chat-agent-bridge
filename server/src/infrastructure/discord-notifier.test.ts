@@ -622,6 +622,23 @@ describe('createNotifier', () => {
       expect(callback).toHaveBeenCalledWith('msg-1');
     });
 
+    it('非同期コールバック（Promise を返す）が正しく await される', async () => {
+      const { thread } = createMockThread();
+      const notifier = createNotifier(thread);
+      const order: string[] = [];
+      notifier.onResultSent = async (msgId) => {
+        await new Promise((r) => setTimeout(r, 10));
+        order.push(`recorded:${msgId}`);
+      };
+
+      notifier.notify({ type: 'result', text: '完了' });
+      notifier.notify({ type: 'usage', usage: usageEmpty });
+
+      await vi.waitFor(() => {
+        expect(order).toEqual(['recorded:msg-1']);
+      });
+    });
+
     it('error 送信時は onResultSent が呼ばれない', async () => {
       const { thread } = createMockThread();
       const notifier = createNotifier(thread);
