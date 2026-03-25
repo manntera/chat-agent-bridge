@@ -104,16 +104,24 @@ export function createNotifier(thread: ThreadSender): Notifier {
   }
 
   function sendText(text: string): void {
-    thread.send(text).catch((err) => console.error('Discord send error:', err));
-    if (isTyping) fireTyping();
+    thread.send(text).then(
+      () => {
+        if (isTyping) fireTyping();
+      },
+      (err) => console.error('Discord send error:', err),
+    );
   }
 
   function sendEmbed(embed: EmbedData, withMention = false): void {
     const m = withMention ? mention() : null;
     const opts: SendOptions = { embeds: [embed] };
     if (m) opts.content = m;
-    thread.send(opts).catch((err) => console.error('Discord send error:', err));
-    if (isTyping) fireTyping();
+    thread.send(opts).then(
+      () => {
+        if (isTyping) fireTyping();
+      },
+      (err) => console.error('Discord send error:', err),
+    );
   }
 
   function flush(usage: UsageInfo): void {

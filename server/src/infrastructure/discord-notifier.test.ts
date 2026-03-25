@@ -438,20 +438,22 @@ describe('createNotifier', () => {
       vi.useRealTimers();
     });
 
-    it('progress started で sendTyping が呼ばれる', () => {
+    it('progress started で sendTyping が呼ばれる', async () => {
       const { thread } = createMockThread();
       const { notify } = createNotifier(thread);
 
       notify({ type: 'progress', event: { kind: 'started' } });
+      await Promise.resolve(); // send 完了後の .then() をフラッシュ
 
       expect(thread.sendTyping).toHaveBeenCalledTimes(2); // startTyping + sendEmbed 後の再送
     });
 
-    it('8秒間隔で sendTyping が再送される', () => {
+    it('8秒間隔で sendTyping が再送される', async () => {
       const { thread } = createMockThread();
       const { notify } = createNotifier(thread);
 
       notify({ type: 'progress', event: { kind: 'started' } });
+      await Promise.resolve();
       expect(thread.sendTyping).toHaveBeenCalledTimes(2);
 
       vi.advanceTimersByTime(8000);
@@ -461,29 +463,33 @@ describe('createNotifier', () => {
       expect(thread.sendTyping).toHaveBeenCalledTimes(4);
     });
 
-    it('sendEmbed 後に sendTyping が再送される', () => {
+    it('sendEmbed 後に sendTyping が再送される', async () => {
       const { thread } = createMockThread();
       const { notify } = createNotifier(thread);
 
       notify({ type: 'progress', event: { kind: 'started' } });
+      await Promise.resolve();
       const countAfterStarted = vi.mocked(thread.sendTyping).mock.calls.length;
 
       notify({
         type: 'progress',
         event: { kind: 'tool_use', toolName: 'Edit', target: 'a.ts' },
       });
+      await Promise.resolve();
 
       expect(thread.sendTyping).toHaveBeenCalledTimes(countAfterStarted + 1);
     });
 
-    it('sendText 後に sendTyping が再送される', () => {
+    it('sendText 後に sendTyping が再送される', async () => {
       const { thread } = createMockThread();
       const { notify } = createNotifier(thread);
 
       notify({ type: 'progress', event: { kind: 'started' } });
+      await Promise.resolve();
       const countAfterStarted = vi.mocked(thread.sendTyping).mock.calls.length;
 
       notify({ type: 'info', message: 'テスト' });
+      await Promise.resolve();
 
       expect(thread.sendTyping).toHaveBeenCalledTimes(countAfterStarted + 1);
     });
@@ -516,16 +522,18 @@ describe('createNotifier', () => {
       expect(thread.sendTyping).toHaveBeenCalledTimes(countBeforeUsage);
     });
 
-    it('startTyping は二重に呼ばれない', () => {
+    it('startTyping は二重に呼ばれない', async () => {
       const { thread } = createMockThread();
       const { notify } = createNotifier(thread);
 
       notify({ type: 'progress', event: { kind: 'started' } });
+      await Promise.resolve();
       const countAfterFirst = vi.mocked(thread.sendTyping).mock.calls.length;
 
       // 2回目の started は startTyping を再度呼ばない（isTyping ガード）
       // ただし sendEmbed 後の再送は発生する
       notify({ type: 'progress', event: { kind: 'started' } });
+      await Promise.resolve();
       expect(thread.sendTyping).toHaveBeenCalledTimes(countAfterFirst + 1); // sendEmbed 後の再送のみ
     });
 
