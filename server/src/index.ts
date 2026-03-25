@@ -106,6 +106,7 @@ async function main(): Promise<void> {
     onProcessEnd = (exitCode, output) => {
       log(`ClaudeProcess 終了 (exitCode: ${exitCode}, thread: ${threadId})`);
       orchestrator.onProcessEnd(exitCode, output);
+      notifier.dispose();
 
       // タイトル生成（非同期・失敗しても無視）
       if (titleGenerator && session.sessionId) {

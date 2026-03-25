@@ -494,6 +494,28 @@ describe('createNotifier', () => {
       expect(thread.sendTyping).toHaveBeenCalledTimes(countAfterFirst + 1); // sendEmbed 後の再送のみ
     });
 
+    it('dispose() で typing が停止しインターバルがクリアされる', () => {
+      const { thread } = createMockThread();
+      const notifier = createNotifier(thread);
+
+      notifier.notify({ type: 'progress', event: { kind: 'started' } });
+      const countAfterStart = vi.mocked(thread.sendTyping).mock.calls.length;
+
+      notifier.dispose();
+
+      vi.advanceTimersByTime(16000);
+      expect(thread.sendTyping).toHaveBeenCalledTimes(countAfterStart);
+    });
+
+    it('dispose() は複数回呼んでも安全', () => {
+      const { thread } = createMockThread();
+      const notifier = createNotifier(thread);
+
+      notifier.notify({ type: 'progress', event: { kind: 'started' } });
+      notifier.dispose();
+      expect(() => notifier.dispose()).not.toThrow();
+    });
+
     it('sendTyping のエラーは握りつぶされる', () => {
       const thread: ThreadSender = {
         send: vi.fn(() => Promise.resolve()),

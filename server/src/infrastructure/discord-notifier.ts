@@ -50,6 +50,7 @@ function formatUsageFooter(usage: UsageInfo): string | null {
 const COLOR_SUCCESS = 0x00c853;
 const COLOR_ERROR = 0xff1744;
 const COLOR_PROGRESS = 0x78909c;
+const TYPING_INTERVAL_MS = 8_000;
 
 type PendingResult =
   | { type: 'result'; text: string }
@@ -58,6 +59,7 @@ type PendingResult =
 export interface Notifier {
   notify: NotifyFn;
   setAuthorId(authorId: string): void;
+  dispose(): void;
 }
 
 /**
@@ -90,7 +92,7 @@ export function createNotifier(thread: ThreadSender): Notifier {
     if (isTyping) return;
     isTyping = true;
     fireTyping();
-    typingInterval = setInterval(fireTyping, 8000);
+    typingInterval = setInterval(fireTyping, TYPING_INTERVAL_MS);
   }
 
   function stopTyping(): void {
@@ -180,6 +182,9 @@ export function createNotifier(thread: ThreadSender): Notifier {
     notify,
     setAuthorId(authorId: string) {
       currentAuthorId = authorId;
+    },
+    dispose() {
+      stopTyping();
     },
   };
 }
