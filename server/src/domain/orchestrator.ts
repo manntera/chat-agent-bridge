@@ -100,6 +100,13 @@ export class Orchestrator {
 
       case 'rewind':
         if (state === 'idle') {
+          if (!command.newSessionId) {
+            this.notify({
+              type: 'info',
+              message: '巻き戻しに失敗しました（セッションIDが不正です）',
+            });
+            break;
+          }
           const prevOptions = { ...this.session.options };
           this.session.reset();
           this.session.restore(command.newSessionId, prevOptions);

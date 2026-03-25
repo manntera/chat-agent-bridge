@@ -113,12 +113,10 @@ async function main(): Promise<void> {
     const orchestrator = new Orchestrator(session, claudeProcess, notify, usageFetcher);
 
     // ターン記録コールバックを設定
-    notifier.onResultSent = (discordMessageId) => {
+    notifier.onResultSent = async (discordMessageId) => {
       const sid = session.sessionId;
       if (sid) {
-        turnStore
-          .record(sid, workspace.path, orchestrator.currentTurn, discordMessageId)
-          .catch((err) => console.error('Turn record error:', err));
+        await turnStore.record(sid, workspace.path, orchestrator.currentTurn, discordMessageId);
       }
     };
 
@@ -232,12 +230,12 @@ async function main(): Promise<void> {
       );
 
       if (turn !== null) {
+        // busy/interrupting 時は branch せず通知のみ（Orchestrator 側で処理）
         if (ctx.orchestrator.state !== 'idle') {
-          // 通知は Orchestrator 側で行う
           ctx.orchestrator.handleCommand({
             type: 'rewind',
             targetTurn: turn,
-            newSessionId: '',
+            newSessionId: '', // busy 時は Orchestrator が拒否するため使われない
             prompt,
           });
           return;

@@ -691,6 +691,26 @@ describe('Orchestrator', () => {
       expect(notifications).toHaveLength(0);
     });
 
+    it('Idle + rewind で newSessionId が空 → セッション変更せずエラー通知', () => {
+      const ctx = createOrchestrator();
+      toIdleAfterTask(ctx);
+      const prevSessionId = ctx.session.sessionId;
+
+      ctx.orchestrator.handleCommand({
+        type: 'rewind',
+        targetTurn: 1,
+        newSessionId: '',
+        prompt: 'test',
+      });
+
+      expect(ctx.session.sessionId).toBe(prevSessionId);
+      expect(ctx.orchestrator.state).toBe('idle');
+      expect(ctx.notifications[0]).toEqual({
+        type: 'info',
+        message: '巻き戻しに失敗しました（セッションIDが不正です）',
+      });
+    });
+
     it('rewind 後もセッションオプション (model/effort) が引き継がれる', () => {
       const ctx = createOrchestrator();
       ctx.orchestrator.handleCommand({
