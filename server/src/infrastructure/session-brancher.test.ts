@@ -155,17 +155,16 @@ describe('SessionBrancher', () => {
     const turnStore = new TurnStore();
     const brancher = new SessionBrancher(turnStore);
 
-    const lines = [
-      metadataLine(),
-      userLine('質問1'),
-      assistantLine('回答1'),
-    ];
+    const lines = [metadataLine(), userLine('質問1'), assistantLine('回答1')];
     await writeFile(join(projDir, 'original.jsonl'), lines.join('\n'));
 
     const newId = await brancher.branch('original', '/work', 0);
 
     const newContent = await readFile(join(projDir, `${newId}.jsonl`), 'utf-8');
-    const newLines = newContent.trim().split('\n').filter((l) => l.trim() !== '');
+    const newLines = newContent
+      .trim()
+      .split('\n')
+      .filter((l) => l.trim() !== '');
     // メタデータ行のみ
     expect(newLines).toHaveLength(1);
     expect(JSON.parse(newLines[0]).type).toBe('file-history-snapshot');
