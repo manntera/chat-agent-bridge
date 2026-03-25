@@ -36,6 +36,23 @@ function assistantLine(content: string): string {
   });
 }
 
+function toolUseLine(): string {
+  return JSON.stringify({
+    type: 'assistant',
+    message: {
+      role: 'assistant',
+      content: [{ type: 'tool_use', id: 't1', name: 'read', input: {} }],
+    },
+  });
+}
+
+function toolResultLine(): string {
+  return JSON.stringify({
+    type: 'user',
+    message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'ok' }] },
+  });
+}
+
 function metadataLine(): string {
   return JSON.stringify({ type: 'file-history-snapshot', messageId: 'test', snapshot: {} });
 }
@@ -181,6 +198,35 @@ describe('SessionBrancher', () => {
 
     const newContent = await readFile(join(projDir, `${newId}.jsonl`), 'utf-8');
     expect(newContent).toBe('');
+  });
+
+  it('ツール使用を含むターンが正しく1ターンとしてカウントされる', async () => {
+    const turnStore = new TurnStore();
+    const brancher = new SessionBrancher(turnStore);
+
+    // Turn 1: ツール使用あり（user → assistant(tool_use) → user(tool_result) → assistant(text)）
+    // Turn 2: 通常（user → assistant）
+    // Turn 3: 通常（user → assistant）
+    const lines = [
+      userLine('質問1'),
+      toolUseLine(),
+      toolResultLine(),
+      assistantLine('回答1'),
+      userLine('質問2'),
+      assistantLine('回答2'),
+      userLine('質問3'),
+      assistantLine('回答3'),
+    ];
+    await writeFile(join(projDir, 'original.jsonl'), lines.join('\n'));
+
+    const newId = await brancher.branch('original', '/work', 2);
+
+    const newContent = await readFile(join(projDir, `${newId}.jsonl`), 'utf-8');
+    const newLines = newContent.trim().split('\n');
+    // Turn 1 (4行: user, assistant(tool), user(tool_result), assistant) + Turn 2 (2行: user, assistant) = 6行
+    expect(newLines).toHaveLength(6);
+    expect(JSON.parse(newLines[4]).message.content).toBe('質問2');
+    expect(JSON.parse(newLines[5]).message.content[0].text).toBe('回答2');
   });
 
   it('targetTurn が実際のターン数を超える場合にエラーを投げる', async () => {
