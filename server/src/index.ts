@@ -51,6 +51,9 @@ async function main(): Promise<void> {
   const threadMappingStore = new ThreadMappingStore(config.threadSessionsFile);
   log('スレッドセッションマッピングを読み込みました');
 
+  // セッション復元中の排他制御（同一スレッドへの並行復元を防止）
+  const pendingRestorations = new Map<string, Promise<SessionContext | null>>();
+
   const client = new Client({
     intents: [
       GatewayIntentBits.Guilds,
@@ -166,13 +169,6 @@ async function main(): Promise<void> {
     }));
     const { prompt, error } = await resolvePrompt(msg.content, attachments);
 
-    if (error) {
-      const ctx = sessionManager.get(msg.channelId);
-      if (ctx) {
-        msg.channel.send(error).catch((err) => console.error('Discord send error:', err));
-      }
-    }
-
     if (prompt === null) return;
 
     log(
@@ -214,6 +210,7 @@ async function main(): Promise<void> {
             } catch (err) {
               console.error('Session restore error:', err);
               sessionManager.remove(msg.channelId);
+              threadMappingStore.remove(msg.channelId);
               msg.channel
                 .send(
                   'セッションの復元に失敗しました。`/cc resume` で再開するか、`/cc new` で新しいセッションを開始してください。',
@@ -238,6 +235,10 @@ async function main(): Promise<void> {
       }
     }
 
+    if (error && ctx) {
+      msg.channel.send(error).catch((err) => console.error('Discord send error:', err));
+    }
+
     if (ctx) {
       ctx.setAuthorId(msg.author.id);
     }
@@ -256,9 +257,6 @@ async function main(): Promise<void> {
       log(`状態遷移: ${prevState} → ${newState} (thread: ${msg.channelId})`);
     }
   });
-
-  // セッション復元中の排他制御（同一スレッドへの並行復元を防止）
-  const pendingRestorations = new Map<string, Promise<SessionContext | null>>();
 
   // /cc new のワークスペース選択待ち中の options を一時保持
   const pendingNewOptions = new Map<string, import('./domain/types.js').SessionOptions>();
