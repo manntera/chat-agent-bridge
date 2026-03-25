@@ -571,10 +571,7 @@ describe('createNotifier', () => {
       expect(() => notify({ type: 'progress', event: { kind: 'started' } })).not.toThrow();
       await Promise.resolve(); // .catch() コールバックをフラッシュ
 
-      expect(errorSpy).toHaveBeenCalledWith(
-        'Discord sendTyping error:',
-        expect.any(Error),
-      );
+      expect(errorSpy).toHaveBeenCalledWith('Discord sendTyping error:', expect.any(Error));
       errorSpy.mockRestore();
     });
   });
