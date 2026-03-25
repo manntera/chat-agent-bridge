@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { SendOptions, ThreadSender } from './discord-notifier.js';
 import { createNotifier } from './discord-notifier.js';
 import type { UsageInfo } from '../domain/types.js';
@@ -18,6 +18,7 @@ function createMockThread() {
       sent.push({ type, content });
       return Promise.resolve();
     }),
+    sendTyping: vi.fn(() => Promise.resolve()),
     setName: vi.fn(() => Promise.resolve()),
   };
   return { thread, sent };
@@ -426,12 +427,162 @@ describe('createNotifier', () => {
     });
   });
 
+  // ----- Typing Indicator -----
+
+  describe('Typing Indicator', () => {
+    beforeEach(() => {
+      vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+      vi.useRealTimers();
+    });
+
+    it('progress started で sendTyping が呼ばれる', async () => {
+      const { thread } = createMockThread();
+      const { notify } = createNotifier(thread);
+
+      notify({ type: 'progress', event: { kind: 'started' } });
+      await Promise.resolve(); // send 完了後の .then() をフラッシュ
+
+      expect(thread.sendTyping).toHaveBeenCalledTimes(2); // startTyping + sendEmbed 後の再送
+    });
+
+    it('8秒間隔で sendTyping が再送される', async () => {
+      const { thread } = createMockThread();
+      const { notify } = createNotifier(thread);
+
+      notify({ type: 'progress', event: { kind: 'started' } });
+      await Promise.resolve();
+      expect(thread.sendTyping).toHaveBeenCalledTimes(2);
+
+      vi.advanceTimersByTime(8000);
+      expect(thread.sendTyping).toHaveBeenCalledTimes(3);
+
+      vi.advanceTimersByTime(8000);
+      expect(thread.sendTyping).toHaveBeenCalledTimes(4);
+    });
+
+    it('sendEmbed 後に sendTyping が再送される', async () => {
+      const { thread } = createMockThread();
+      const { notify } = createNotifier(thread);
+
+      notify({ type: 'progress', event: { kind: 'started' } });
+      await Promise.resolve();
+      const countAfterStarted = vi.mocked(thread.sendTyping).mock.calls.length;
+
+      notify({
+        type: 'progress',
+        event: { kind: 'tool_use', toolName: 'Edit', target: 'a.ts' },
+      });
+      await Promise.resolve();
+
+      expect(thread.sendTyping).toHaveBeenCalledTimes(countAfterStarted + 1);
+    });
+
+    it('sendText 後に sendTyping が再送される', async () => {
+      const { thread } = createMockThread();
+      const { notify } = createNotifier(thread);
+
+      notify({ type: 'progress', event: { kind: 'started' } });
+      await Promise.resolve();
+      const countAfterStarted = vi.mocked(thread.sendTyping).mock.calls.length;
+
+      notify({ type: 'info', message: 'テスト' });
+      await Promise.resolve();
+
+      expect(thread.sendTyping).toHaveBeenCalledTimes(countAfterStarted + 1);
+    });
+
+    it('usage 通知で typing が停止する', () => {
+      const { thread } = createMockThread();
+      const { notify } = createNotifier(thread);
+
+      notify({ type: 'progress', event: { kind: 'started' } });
+      notify({ type: 'result', text: '完了' });
+      notify({ type: 'usage', usage: usageEmpty });
+
+      const countAfterUsage = vi.mocked(thread.sendTyping).mock.calls.length;
+
+      vi.advanceTimersByTime(16000);
+      expect(thread.sendTyping).toHaveBeenCalledTimes(countAfterUsage);
+    });
+
+    it('usage 後の flush 内メッセージ送信では sendTyping が再送されない', () => {
+      const { thread } = createMockThread();
+      const { notify } = createNotifier(thread);
+
+      notify({ type: 'progress', event: { kind: 'started' } });
+      const countBeforeUsage = vi.mocked(thread.sendTyping).mock.calls.length;
+
+      notify({ type: 'result', text: '完了' });
+      notify({ type: 'usage', usage: usageEmpty });
+
+      // stopTyping が先に呼ばれるため、flush 内の sendText では sendTyping されない
+      expect(thread.sendTyping).toHaveBeenCalledTimes(countBeforeUsage);
+    });
+
+    it('startTyping は二重に呼ばれない', async () => {
+      const { thread } = createMockThread();
+      const { notify } = createNotifier(thread);
+
+      notify({ type: 'progress', event: { kind: 'started' } });
+      await Promise.resolve();
+      const countAfterFirst = vi.mocked(thread.sendTyping).mock.calls.length;
+
+      // 2回目の started は startTyping を再度呼ばない（isTyping ガード）
+      // ただし sendEmbed 後の再送は発生する
+      notify({ type: 'progress', event: { kind: 'started' } });
+      await Promise.resolve();
+      expect(thread.sendTyping).toHaveBeenCalledTimes(countAfterFirst + 1); // sendEmbed 後の再送のみ
+    });
+
+    it('dispose() で typing が停止しインターバルがクリアされる', () => {
+      const { thread } = createMockThread();
+      const notifier = createNotifier(thread);
+
+      notifier.notify({ type: 'progress', event: { kind: 'started' } });
+      const countAfterStart = vi.mocked(thread.sendTyping).mock.calls.length;
+
+      notifier.dispose();
+
+      vi.advanceTimersByTime(16000);
+      expect(thread.sendTyping).toHaveBeenCalledTimes(countAfterStart);
+    });
+
+    it('dispose() は複数回呼んでも安全', () => {
+      const { thread } = createMockThread();
+      const notifier = createNotifier(thread);
+
+      notifier.notify({ type: 'progress', event: { kind: 'started' } });
+      notifier.dispose();
+      expect(() => notifier.dispose()).not.toThrow();
+    });
+
+    it('sendTyping のエラーは catch され console.error に出力される', async () => {
+      const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const thread: ThreadSender = {
+        send: vi.fn(() => Promise.resolve()),
+        sendTyping: vi.fn(() => Promise.reject(new Error('typing error'))),
+        setName: vi.fn(() => Promise.resolve()),
+      };
+      const { notify } = createNotifier(thread);
+
+      expect(() => notify({ type: 'progress', event: { kind: 'started' } })).not.toThrow();
+      await Promise.resolve(); // .catch() コールバックをフラッシュ
+
+      expect(errorSpy).toHaveBeenCalledWith('Discord sendTyping error:', expect.any(Error));
+      errorSpy.mockRestore();
+    });
+  });
+
   // ----- 送信エラー -----
 
   describe('送信エラー', () => {
     it('テキスト send が失敗してもエラーを投げない', () => {
       const thread: ThreadSender = {
         send: vi.fn(() => Promise.reject(new Error('network error'))),
+        sendTyping: vi.fn(() => Promise.resolve()),
         setName: vi.fn(() => Promise.resolve()),
       };
       const { notify } = createNotifier(thread);
@@ -442,6 +593,7 @@ describe('createNotifier', () => {
     it('embed send が失敗してもエラーを投げない', () => {
       const thread: ThreadSender = {
         send: vi.fn(() => Promise.reject(new Error('network error'))),
+        sendTyping: vi.fn(() => Promise.resolve()),
         setName: vi.fn(() => Promise.resolve()),
       };
       const { notify } = createNotifier(thread);
@@ -453,6 +605,7 @@ describe('createNotifier', () => {
     it('progress の embed send が失敗してもエラーを投げない', () => {
       const thread: ThreadSender = {
         send: vi.fn(() => Promise.reject(new Error('network error'))),
+        sendTyping: vi.fn(() => Promise.resolve()),
         setName: vi.fn(() => Promise.resolve()),
       };
       const { notify } = createNotifier(thread);

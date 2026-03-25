@@ -13,6 +13,7 @@ const mockStat = vi.mocked(stat);
 function createMockThread(): ThreadSender {
   return {
     send: vi.fn().mockResolvedValue(undefined),
+    sendTyping: vi.fn().mockResolvedValue(undefined),
     setName: vi.fn().mockResolvedValue(undefined),
   };
 }

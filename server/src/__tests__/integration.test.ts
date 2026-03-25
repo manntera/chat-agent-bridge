@@ -57,6 +57,7 @@ function createIntegrationContext() {
       sent.push({ content });
       return Promise.resolve();
     }),
+    sendTyping: vi.fn(() => Promise.resolve()),
     setName: vi.fn(() => Promise.resolve()),
   };
 

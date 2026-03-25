@@ -14,6 +14,7 @@ export interface SendOptions {
 
 export interface ThreadSender {
   send(content: string | SendOptions): Promise<unknown>;
+  sendTyping(): Promise<unknown>;
   setName(name: string): Promise<unknown>;
 }
 
@@ -49,6 +50,7 @@ function formatUsageFooter(usage: UsageInfo): string | null {
 const COLOR_SUCCESS = 0x00c853;
 const COLOR_ERROR = 0xff1744;
 const COLOR_PROGRESS = 0x78909c;
+const TYPING_INTERVAL_MS = 8_000;
 
 type PendingResult =
   | { type: 'result'; text: string }
@@ -57,6 +59,7 @@ type PendingResult =
 export interface Notifier {
   notify: NotifyFn;
   setAuthorId(authorId: string): void;
+  dispose(): void;
 }
 
 /**
@@ -74,20 +77,51 @@ export interface Notifier {
 export function createNotifier(thread: ThreadSender): Notifier {
   let pendingResult: PendingResult | null = null;
   let currentAuthorId: string | null = null;
+  let typingInterval: NodeJS.Timeout | null = null;
+  let isTyping = false;
 
   function mention(): string | null {
     return currentAuthorId ? `<@${currentAuthorId}>` : null;
   }
 
+  function fireTyping(): void {
+    thread.sendTyping().catch((err) => console.error('Discord sendTyping error:', err));
+  }
+
+  function startTyping(): void {
+    if (isTyping) return;
+    isTyping = true;
+    fireTyping();
+    typingInterval = setInterval(fireTyping, TYPING_INTERVAL_MS);
+  }
+
+  function stopTyping(): void {
+    isTyping = false;
+    if (typingInterval) {
+      clearInterval(typingInterval);
+      typingInterval = null;
+    }
+  }
+
   function sendText(text: string): void {
-    thread.send(text).catch((err) => console.error('Discord send error:', err));
+    thread.send(text).then(
+      () => {
+        if (isTyping) fireTyping();
+      },
+      (err) => console.error('Discord send error:', err),
+    );
   }
 
   function sendEmbed(embed: EmbedData, withMention = false): void {
     const m = withMention ? mention() : null;
     const opts: SendOptions = { embeds: [embed] };
     if (m) opts.content = m;
-    thread.send(opts).catch((err) => console.error('Discord send error:', err));
+    thread.send(opts).then(
+      () => {
+        if (isTyping) fireTyping();
+      },
+      (err) => console.error('Discord send error:', err),
+    );
   }
 
   function flush(usage: UsageInfo): void {
@@ -133,6 +167,7 @@ export function createNotifier(thread: ThreadSender): Notifier {
   const notify: NotifyFn = (notification: Notification) => {
     switch (notification.type) {
       case 'progress':
+        if (notification.event.kind === 'started') startTyping();
         sendEmbed({ color: COLOR_PROGRESS, description: formatProgress(notification) });
         break;
       case 'info':
@@ -149,6 +184,7 @@ export function createNotifier(thread: ThreadSender): Notifier {
         };
         break;
       case 'usage':
+        stopTyping();
         flush(notification.usage);
         break;
     }
@@ -158,6 +194,9 @@ export function createNotifier(thread: ThreadSender): Notifier {
     notify,
     setAuthorId(authorId: string) {
       currentAuthorId = authorId;
+    },
+    dispose() {
+      stopTyping();
     },
   };
 }

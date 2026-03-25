@@ -54,6 +54,7 @@ function createIntegrationContext() {
       sent.push({ type, content });
       return Promise.resolve();
     }),
+    sendTyping: vi.fn(() => Promise.resolve()),
     setName: vi.fn(() => Promise.resolve()),
   };
 
@@ -372,6 +373,7 @@ describe('統合テスト: コンポーネント配線', () => {
           sent2.push({ type: typeof content === 'string' ? 'text' : 'embed', content });
           return Promise.resolve();
         }),
+        sendTyping: vi.fn(() => Promise.resolve()),
         setName: vi.fn(() => Promise.resolve()),
       };
 
