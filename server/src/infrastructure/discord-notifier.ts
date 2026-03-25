@@ -48,7 +48,7 @@ function formatUsageFooter(usage: UsageInfo): string | null {
 
 const COLOR_SUCCESS = 0x00c853;
 const COLOR_ERROR = 0xff1744;
-const EMBED_MAX_LENGTH = 4096;
+const COLOR_PROGRESS = 0x78909c;
 
 type PendingResult =
   | { type: 'result'; text: string }
@@ -63,9 +63,11 @@ export interface Notifier {
  * セッションスレッド用の Notifier を作成する。
  *
  * 通知の流れ:
- * - progress / info → プレーンテキストとして即座に送信
- * - result / error → バッファ（usage を待つ）
- * - usage → バッファされた result/error と結合して Embed で送信
+ * - progress → Embed として即座に送信
+ * - info → プレーンテキストとして即座に送信
+ * - result → バッファ → usage 到着時にプレーンテキストで送信
+ * - error → バッファ → usage 到着時に Embed で送信
+ * - usage → バッファされた result/error と結合して送信
  *
  * setAuthorId で質問者を設定すると、started / result / error 送信時にメンションを付与する。
  */
@@ -101,26 +103,17 @@ export function createNotifier(thread: ThreadSender): Notifier {
     }
 
     if (result.type === 'result') {
-      if (result.text.length <= EMBED_MAX_LENGTH) {
-        const embed: EmbedData = {
-          color: COLOR_SUCCESS,
-          description: result.text,
-        };
-        if (footer) embed.footer = { text: footer };
-        sendEmbed(embed, true);
-      } else {
-        const chunks = splitMessage(result.text);
-        const m = mention();
-        for (let i = 0; i < chunks.length; i++) {
-          if (i === 0 && m) {
-            sendText(`${m} ${chunks[i]}`);
-          } else {
-            sendText(chunks[i]);
-          }
+      const m = mention();
+      const chunks = splitMessage(result.text);
+      for (let i = 0; i < chunks.length; i++) {
+        if (i === 0 && m) {
+          sendText(`${m} ${chunks[i]}`);
+        } else {
+          sendText(chunks[i]);
         }
-        const embed: EmbedData = { color: COLOR_SUCCESS };
-        if (footer) embed.footer = { text: footer };
-        sendEmbed(embed);
+      }
+      if (footer) {
+        sendText(footer);
       }
     } else {
       const embed: EmbedData = {
@@ -136,7 +129,7 @@ export function createNotifier(thread: ThreadSender): Notifier {
   const notify: NotifyFn = (notification: Notification) => {
     switch (notification.type) {
       case 'progress':
-        sendText(formatProgress(notification));
+        sendEmbed({ color: COLOR_PROGRESS, description: formatProgress(notification) });
         break;
       case 'info':
         sendText(notification.message);

@@ -49,18 +49,19 @@ describe('createNotifier', () => {
   // ----- progress 通知 -----
 
   describe('progress 通知', () => {
-    it('started イベントをプレーンテキストで送信する', () => {
+    it('started イベントを Embed で送信する', () => {
       const { thread, sent } = createMockThread();
       const { notify } = createNotifier(thread);
 
       notify({ type: 'progress', event: { kind: 'started' } });
 
       expect(sent).toHaveLength(1);
-      expect(sent[0].type).toBe('text');
-      expect(sent[0].content).toBe('📨 受信しました。処理を開始します...');
+      expect(sent[0].type).toBe('embed');
+      const options = sent[0].content as SendOptions;
+      expect(options.embeds[0].description).toBe('📨 受信しました。処理を開始します...');
     });
 
-    it('ツール使用イベントをプレーンテキストで送信する', () => {
+    it('ツール使用イベントを Embed で送信する', () => {
       const { thread, sent } = createMockThread();
       const { notify } = createNotifier(thread);
 
@@ -70,20 +71,22 @@ describe('createNotifier', () => {
       });
 
       expect(sent).toHaveLength(1);
-      expect(sent[0].type).toBe('text');
-      expect(sent[0].content).toContain('Edit');
-      expect(sent[0].content).toContain('src/index.ts');
+      expect(sent[0].type).toBe('embed');
+      const options = sent[0].content as SendOptions;
+      expect(options.embeds[0].description).toContain('Edit');
+      expect(options.embeds[0].description).toContain('src/index.ts');
     });
 
-    it('拡張思考イベントをプレーンテキストで送信する', () => {
+    it('拡張思考イベントを Embed で送信する', () => {
       const { thread, sent } = createMockThread();
       const { notify } = createNotifier(thread);
 
       notify({ type: 'progress', event: { kind: 'thinking', text: 'コードを分析中...' } });
 
       expect(sent).toHaveLength(1);
-      expect(sent[0].type).toBe('text');
-      expect(sent[0].content).toBe('💭 コードを分析中...');
+      expect(sent[0].type).toBe('embed');
+      const options = sent[0].content as SendOptions;
+      expect(options.embeds[0].description).toBe('💭 コードを分析中...');
     });
   });
 
@@ -114,7 +117,7 @@ describe('createNotifier', () => {
       expect(sent).toHaveLength(0); // まだ送信されない
     });
 
-    it('usage 到着時に result を緑色 Embed で送信する', () => {
+    it('usage 到着時に result をプレーンテキストで送信する', () => {
       const { thread, sent } = createMockThread();
       const { notify } = createNotifier(thread);
 
@@ -122,34 +125,35 @@ describe('createNotifier', () => {
       notify({ type: 'usage', usage: usageEmpty });
 
       expect(sent).toHaveLength(1);
-      expect(sent[0].type).toBe('embed');
-      const options = sent[0].content as SendOptions;
-      expect(options.embeds[0].color).toBe(0x00c853);
-      expect(options.embeds[0].description).toBe('テストを追加しました');
+      expect(sent[0].type).toBe('text');
+      expect(sent[0].content).toBe('テストを追加しました');
     });
 
-    it('usage データがある場合はフッターに含まれる', () => {
+    it('usage データがある場合はフッターがテキストで送信される', () => {
       const { thread, sent } = createMockThread();
       const { notify } = createNotifier(thread);
 
       notify({ type: 'result', text: '完了' });
       notify({ type: 'usage', usage: usageWithData });
 
-      expect(sent).toHaveLength(1);
-      const options = sent[0].content as SendOptions;
-      expect(options.embeds[0].footer?.text).toBe('📊 5h 45% | 7d 30%');
+      expect(sent).toHaveLength(2);
+      expect(sent[0].type).toBe('text');
+      expect(sent[0].content).toBe('完了');
+      expect(sent[1].type).toBe('text');
+      expect(sent[1].content).toBe('📊 5h 45% | 7d 30%');
     });
 
-    it('Sonnet 利用状況がフッターに含まれる', () => {
+    it('Sonnet 利用状況がフッターがテキストで送信される', () => {
       const { thread, sent } = createMockThread();
       const { notify } = createNotifier(thread);
 
       notify({ type: 'result', text: '完了' });
       notify({ type: 'usage', usage: usageWithSonnet });
 
-      expect(sent).toHaveLength(1);
-      const options = sent[0].content as SendOptions;
-      expect(options.embeds[0].footer?.text).toBe('📊 5h 45% | Sonnet 80%');
+      expect(sent).toHaveLength(2);
+      expect(sent[0].type).toBe('text');
+      expect(sent[1].type).toBe('text');
+      expect(sent[1].content).toBe('📊 5h 45% | Sonnet 80%');
     });
 
     it('usage データがない場合はフッターなし', () => {
@@ -159,11 +163,12 @@ describe('createNotifier', () => {
       notify({ type: 'result', text: '完了' });
       notify({ type: 'usage', usage: usageEmpty });
 
-      const options = sent[0].content as SendOptions;
-      expect(options.embeds[0].footer).toBeUndefined();
+      expect(sent).toHaveLength(1);
+      expect(sent[0].type).toBe('text');
+      expect(sent[0].content).toBe('完了');
     });
 
-    it('4096 文字超の result（usage データなし）はプレーンテキスト分割 + 空 Embed', () => {
+    it('長文 result はプレーンテキスト分割で送信する', () => {
       const { thread, sent } = createMockThread();
       const { notify } = createNotifier(thread);
 
@@ -171,15 +176,14 @@ describe('createNotifier', () => {
       notify({ type: 'result', text: longText });
       notify({ type: 'usage', usage: usageEmpty });
 
-      expect(sent).toHaveLength(4);
+      // 5000文字 → 2000 + 2000 + 1000 のプレーンテキスト
+      expect(sent).toHaveLength(3);
       expect(sent[0].type).toBe('text');
-      expect(sent[3].type).toBe('embed');
-      const options = sent[3].content as SendOptions;
-      expect(options.embeds[0].color).toBe(0x00c853);
-      expect(options.embeds[0].footer).toBeUndefined();
+      expect(sent[1].type).toBe('text');
+      expect(sent[2].type).toBe('text');
     });
 
-    it('4096 文字超の result はプレーンテキスト分割 + フッター Embed', () => {
+    it('長文 result はプレーンテキスト分割 + フッターテキストで送信する', () => {
       const { thread, sent } = createMockThread();
       const { notify } = createNotifier(thread);
 
@@ -187,16 +191,13 @@ describe('createNotifier', () => {
       notify({ type: 'result', text: longText });
       notify({ type: 'usage', usage: usageWithData });
 
-      // 5000文字 → 2000 + 2000 + 1000 のプレーンテキスト + 1 Embed
+      // 5000文字 → 2000 + 2000 + 1000 のプレーンテキスト + 1 フッターテキスト
       expect(sent).toHaveLength(4);
       expect(sent[0].type).toBe('text');
       expect(sent[1].type).toBe('text');
       expect(sent[2].type).toBe('text');
-      expect(sent[3].type).toBe('embed');
-      const options = sent[3].content as SendOptions;
-      expect(options.embeds[0].color).toBe(0x00c853);
-      expect(options.embeds[0].footer?.text).toBe('📊 5h 45% | 7d 30%');
-      expect(options.embeds[0].description).toBeUndefined();
+      expect(sent[3].type).toBe('text');
+      expect(sent[3].content).toBe('📊 5h 45% | 7d 30%');
     });
   });
 
@@ -276,14 +277,13 @@ describe('createNotifier', () => {
       notify({ type: 'result', text: '完了しました' });
       notify({ type: 'usage', usage: usageWithData });
 
-      expect(sent).toHaveLength(3); // 2 progress + 1 embed
-      expect(sent[0].type).toBe('text');
-      expect(sent[1].type).toBe('text');
-      expect(sent[2].type).toBe('embed');
-      const options = sent[2].content as SendOptions;
-      expect(options.embeds[0].color).toBe(0x00c853);
-      expect(options.embeds[0].description).toBe('完了しました');
-      expect(options.embeds[0].footer?.text).toBe('📊 5h 45% | 7d 30%');
+      expect(sent).toHaveLength(4); // 2 progress embed + 1 result text + 1 footer text
+      expect(sent[0].type).toBe('embed');
+      expect(sent[1].type).toBe('embed');
+      expect(sent[2].type).toBe('text');
+      expect(sent[2].content).toBe('完了しました');
+      expect(sent[3].type).toBe('text');
+      expect(sent[3].content).toBe('📊 5h 45% | 7d 30%');
     });
 
     it('progress → error → usage の完全フロー', () => {
@@ -294,8 +294,8 @@ describe('createNotifier', () => {
       notify({ type: 'error', message: 'command failed', exitCode: 1 });
       notify({ type: 'usage', usage: usageWithData });
 
-      expect(sent).toHaveLength(2); // 1 progress + 1 embed
-      expect(sent[0].type).toBe('text');
+      expect(sent).toHaveLength(2); // 1 progress embed + 1 error embed
+      expect(sent[0].type).toBe('embed');
       expect(sent[1].type).toBe('embed');
       const options = sent[1].content as SendOptions;
       expect(options.embeds[0].color).toBe(0xff1744);
@@ -334,11 +334,12 @@ describe('createNotifier', () => {
       notifier.notify({ type: 'progress', event: { kind: 'thinking', text: '考え中' } });
 
       for (const item of sent) {
-        expect(item.content).not.toContain('<@user123>');
+        const options = item.content as SendOptions;
+        expect(options.content).toBeUndefined();
       }
     });
 
-    it('result の Embed 送信時に content でメンションが付く', () => {
+    it('result のテキスト送信時にメンションが付く', () => {
       const { thread, sent } = createMockThread();
       const notifier = createNotifier(thread);
       notifier.setAuthorId('user456');
@@ -347,9 +348,8 @@ describe('createNotifier', () => {
       notifier.notify({ type: 'usage', usage: usageEmpty });
 
       expect(sent).toHaveLength(1);
-      const options = sent[0].content as SendOptions;
-      expect(options.content).toBe('<@user456>');
-      expect(options.embeds[0].description).toBe('完了');
+      expect(sent[0].type).toBe('text');
+      expect(sent[0].content).toBe('<@user456> 完了');
     });
 
     it('error の Embed 送信時に content でメンションが付く', () => {
