@@ -380,6 +380,41 @@ describe('createNotifier', () => {
       expect((sent[1].content as string).startsWith('<@')).toBe(false);
     });
 
+    it('メンション付きでも各メッセージが2000文字以内に収まる', () => {
+      const { thread, sent } = createMockThread();
+      const notifier = createNotifier(thread);
+      notifier.setAuthorId('user123');
+
+      // ちょうど2000文字のテキスト — メンション分を考慮して分割されるはず
+      const longText = 'B'.repeat(2000);
+      notifier.notify({ type: 'result', text: longText });
+      notifier.notify({ type: 'usage', usage: usageEmpty });
+
+      // メンションプレフィックス "<@user123> " = 12文字
+      // 最初のチャンクは 2000-12=1988 文字 + メンション12文字 = 2000文字
+      // 残りは 2000-1988=12 文字
+      expect(sent).toHaveLength(2);
+      expect(sent[0].type).toBe('text');
+      expect((sent[0].content as string).length).toBeLessThanOrEqual(2000);
+      expect((sent[0].content as string).startsWith('<@user123> ')).toBe(true);
+      expect(sent[1].type).toBe('text');
+      expect((sent[1].content as string).length).toBeLessThanOrEqual(2000);
+    });
+
+    it('メンションなしで2000文字ちょうどのテキストは分割されない', () => {
+      const { thread, sent } = createMockThread();
+      const notifier = createNotifier(thread);
+      // authorId を設定しない — メンションなし
+
+      const longText = 'C'.repeat(2000);
+      notifier.notify({ type: 'result', text: longText });
+      notifier.notify({ type: 'usage', usage: usageEmpty });
+
+      expect(sent).toHaveLength(1);
+      expect(sent[0].type).toBe('text');
+      expect((sent[0].content as string).length).toBe(2000);
+    });
+
     it('info にはメンションが付かない', () => {
       const { thread, sent } = createMockThread();
       const notifier = createNotifier(thread);
