@@ -233,9 +233,13 @@ async function main(): Promise<void> {
 
       if (turn !== null) {
         if (ctx.orchestrator.state !== 'idle') {
-          msg.channel
-            .send('処理中のため巻き戻しできません。完了後に再度お試しください。')
-            .catch(() => {});
+          // 通知は Orchestrator 側で行う
+          ctx.orchestrator.handleCommand({
+            type: 'rewind',
+            targetTurn: turn,
+            newSessionId: '',
+            prompt,
+          });
           return;
         }
 

@@ -112,7 +112,10 @@ export class Orchestrator {
             this.handleCommand({ type: 'prompt', text: command.prompt });
           }
         } else if (state === 'busy' || state === 'interrupting') {
-          this.notify({ type: 'info', message: '処理中です' });
+          this.notify({
+            type: 'info',
+            message: '処理中のため巻き戻しできません。完了後に再度お試しください。',
+          });
         }
         break;
     }

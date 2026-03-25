@@ -659,7 +659,7 @@ describe('Orchestrator', () => {
       expect(ctx.notifications).toHaveLength(1);
     });
 
-    it('Busy + rewind → 「処理中です」通知', () => {
+    it('Busy + rewind → 「処理中のため巻き戻しできません」通知', () => {
       const ctx = createOrchestrator();
       toBusy(ctx);
 
@@ -671,7 +671,10 @@ describe('Orchestrator', () => {
       });
 
       expect(ctx.orchestrator.state).toBe('busy');
-      expect(ctx.notifications[0]).toEqual({ type: 'info', message: '処理中です' });
+      expect(ctx.notifications[0]).toEqual({
+        type: 'info',
+        message: '処理中のため巻き戻しできません。完了後に再度お試しください。',
+      });
     });
 
     it('Initial + rewind → 何もしない', () => {
