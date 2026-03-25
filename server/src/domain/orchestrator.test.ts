@@ -639,7 +639,7 @@ describe('Orchestrator', () => {
 
       expect(ctx.notifications[0]).toEqual({
         type: 'info',
-        message: '⏪ Turn 2 まで巻き戻しました',
+        message: '⏪ Turn 2 まで巻き戻しました [branched]',
       });
     });
 

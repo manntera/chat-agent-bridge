@@ -106,7 +106,7 @@ export class Orchestrator {
           this.turnCount = command.targetTurn;
           this.notify({
             type: 'info',
-            message: `⏪ Turn ${command.targetTurn} まで巻き戻しました`,
+            message: `⏪ Turn ${command.targetTurn} まで巻き戻しました [${command.newSessionId.slice(0, 8)}]`,
           });
           if (command.prompt) {
             this.handleCommand({ type: 'prompt', text: command.prompt });
