@@ -100,8 +100,9 @@ export class Orchestrator {
 
       case 'rewind':
         if (state === 'idle') {
+          const prevOptions = { ...this.session.options };
           this.session.reset();
-          this.session.restore(command.newSessionId);
+          this.session.restore(command.newSessionId, prevOptions);
           this.turnCount = command.targetTurn;
           this.notify({
             type: 'info',

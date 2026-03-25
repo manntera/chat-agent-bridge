@@ -687,6 +687,30 @@ describe('Orchestrator', () => {
       expect(orchestrator.state).toBe('initial');
       expect(notifications).toHaveLength(0);
     });
+
+    it('rewind 後もセッションオプション (model/effort) が引き継がれる', () => {
+      const ctx = createOrchestrator();
+      ctx.orchestrator.handleCommand({
+        type: 'new',
+        options: { model: 'opus', effort: 'max' },
+      });
+      ctx.notifications.length = 0;
+
+      // Busy → Idle
+      ctx.orchestrator.handleMessage('prompt');
+      ctx.mockProcess.simulateEnd();
+      ctx.orchestrator.onProcessEnd(0, 'done');
+      ctx.notifications.length = 0;
+
+      ctx.orchestrator.handleCommand({
+        type: 'rewind',
+        targetTurn: 1,
+        newSessionId: 'branched-id',
+        prompt: '',
+      });
+
+      expect(ctx.session.options).toEqual({ model: 'opus', effort: 'max' });
+    });
   });
 
   // ----- ターンカウンタ -----
