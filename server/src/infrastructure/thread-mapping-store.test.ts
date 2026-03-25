@@ -16,11 +16,11 @@ afterEach(async () => {
 });
 
 describe('ThreadMappingStore', () => {
-  it('set() でマッピングを追加し、get() で取得できる', () => {
+  it('set() でマッピングを追加し、get() で取得できる', async () => {
     const filePath = join(tempDir, 'thread-sessions.json');
     const store = new ThreadMappingStore(filePath);
 
-    store.set('thread-1', {
+    await store.set('thread-1', {
       sessionId: 'session-abc',
       workDir: '/home/user/project',
       workspaceName: 'my-project',
@@ -38,7 +38,7 @@ describe('ThreadMappingStore', () => {
     const filePath = join(tempDir, 'thread-sessions.json');
     const store = new ThreadMappingStore(filePath);
 
-    store.set('thread-1', {
+    await store.set('thread-1', {
       sessionId: 'session-abc',
       workDir: '/home/user/project',
       workspaceName: 'my-project',
@@ -53,11 +53,11 @@ describe('ThreadMappingStore', () => {
     });
   });
 
-  it('永続化されたファイルから新しいインスタンスで読み込める', () => {
+  it('永続化されたファイルから新しいインスタンスで読み込める', async () => {
     const filePath = join(tempDir, 'thread-sessions.json');
     const store1 = new ThreadMappingStore(filePath);
 
-    store1.set('thread-1', {
+    await store1.set('thread-1', {
       sessionId: 'session-abc',
       workDir: '/home/user/project',
       workspaceName: 'my-project',
@@ -73,48 +73,48 @@ describe('ThreadMappingStore', () => {
     });
   });
 
-  it('remove() でマッピングを削除できる', () => {
+  it('remove() でマッピングを削除できる', async () => {
     const filePath = join(tempDir, 'thread-sessions.json');
     const store = new ThreadMappingStore(filePath);
 
-    store.set('thread-1', {
+    await store.set('thread-1', {
       sessionId: 'session-abc',
       workDir: '/home/user/project',
       workspaceName: 'my-project',
     });
 
-    store.remove('thread-1');
+    await store.remove('thread-1');
 
     expect(store.get('thread-1')).toBeNull();
   });
 
-  it('remove() がファイルにも反映される', () => {
+  it('remove() がファイルにも反映される', async () => {
     const filePath = join(tempDir, 'thread-sessions.json');
     const store1 = new ThreadMappingStore(filePath);
 
-    store1.set('thread-1', {
+    await store1.set('thread-1', {
       sessionId: 'session-abc',
       workDir: '/home/user/project',
       workspaceName: 'my-project',
     });
-    store1.remove('thread-1');
+    await store1.remove('thread-1');
 
     // 新しいインスタンスで確認
     const store2 = new ThreadMappingStore(filePath);
     expect(store2.get('thread-1')).toBeNull();
   });
 
-  it('同じ threadId を上書きできる', () => {
+  it('同じ threadId を上書きできる', async () => {
     const filePath = join(tempDir, 'thread-sessions.json');
     const store = new ThreadMappingStore(filePath);
 
-    store.set('thread-1', {
+    await store.set('thread-1', {
       sessionId: 'session-old',
       workDir: '/home/user/old',
       workspaceName: 'old-project',
     });
 
-    store.set('thread-1', {
+    await store.set('thread-1', {
       sessionId: 'session-new',
       workDir: '/home/user/new',
       workspaceName: 'new-project',
@@ -190,16 +190,16 @@ describe('ThreadMappingStore', () => {
     warnSpy.mockRestore();
   });
 
-  it('複数のマッピングを管理できる', () => {
+  it('複数のマッピングを管理できる', async () => {
     const filePath = join(tempDir, 'thread-sessions.json');
     const store = new ThreadMappingStore(filePath);
 
-    store.set('thread-1', {
+    await store.set('thread-1', {
       sessionId: 'session-1',
       workDir: '/home/user/project1',
       workspaceName: 'project1',
     });
-    store.set('thread-2', {
+    await store.set('thread-2', {
       sessionId: 'session-2',
       workDir: '/home/user/project2',
       workspaceName: 'project2',

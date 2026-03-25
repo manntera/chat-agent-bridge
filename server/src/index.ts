@@ -1,5 +1,4 @@
 import 'dotenv/config';
-import { stat } from 'node:fs/promises';
 import { basename, dirname, join } from 'node:path';
 import {
   ActionRowBuilder,
@@ -29,6 +28,7 @@ import type { DailySession } from './infrastructure/report-generator.js';
 import { readSession } from './infrastructure/session-reader.js';
 import { getDayBoundary } from './infrastructure/session-store.js';
 import { UsageFetcher } from './infrastructure/usage-fetcher.js';
+import { SessionRestorer } from './infrastructure/session-restorer.js';
 import { ThreadMappingStore } from './infrastructure/thread-mapping-store.js';
 import { WorkspaceStore, listDirectories } from './infrastructure/workspace-store.js';
 import {
@@ -50,9 +50,6 @@ async function main(): Promise<void> {
   // スレッド→セッションマッピングの永続化
   const threadMappingStore = new ThreadMappingStore(config.threadSessionsFile);
   log('スレッドセッションマッピングを読み込みました');
-
-  // セッション復元中の排他制御（同一スレッドへの並行復元を防止）
-  const pendingRestorations = new Map<string, Promise<SessionContext | null>>();
 
   const client = new Client({
     intents: [
@@ -143,73 +140,24 @@ async function main(): Promise<void> {
     return ctx;
   }
 
-  /**
-   * ディスクのマッピングからセッションを遅延復元する。
-   * 並行メッセージによる二重復元を pendingRestorations で排他制御する。
-   */
-  async function tryRestoreSession(
+  const sessionRestorer = new SessionRestorer({
+    threadMappingStore,
+    sessionManager,
+    createSession,
+    log,
+  });
+
+  /** マッピングをディスクに永続化する */
+  function persistMapping(
     threadId: string,
-    thread: ThreadSender,
-  ): Promise<SessionContext | null> {
-    // 別のメッセージが既に復元中なら、その完了を待つ
-    const pending = pendingRestorations.get(threadId);
-    if (pending) {
-      return pending;
-    }
-
-    const mapping = threadMappingStore.get(threadId);
-    if (!mapping) return null;
-
-    const restorationPromise = (async (): Promise<SessionContext | null> => {
-      // workDir の存在チェック（ディレクトリであることも確認）
-      try {
-        const s = await stat(mapping.workDir);
-        if (!s.isDirectory()) throw new Error('Not a directory');
-      } catch {
-        thread
-          .send(
-            'セッションの復元に失敗しました。ワークディレクトリが見つかりません。`/cc resume` で再開するか、`/cc new` で新しいセッションを開始してください。',
-          )
-          .catch((err) => console.error('Discord send error:', err));
-        threadMappingStore.remove(threadId);
-        return null;
-      }
-
-      // セッション作成・復元
-      // NOTE: createSession は ClaudeProcess を生成して sessionManager に登録する。
-      // restore() が失敗した場合は sessionManager.remove() で登録を解除する。
-      // 現時点では ClaudeProcess はspawn前なのでリソースリークは発生しないが、
-      // 将来 ClaudeProcess のコンストラクタが変更された場合は明示的な破棄が必要になりうる。
-      const restoredCtx = createSession(threadId, thread, {
-        name: mapping.workspaceName,
-        path: mapping.workDir,
-      });
-      try {
-        restoredCtx.session.restore(mapping.sessionId);
-      } catch (err) {
-        console.error('Session restore error:', err);
-        sessionManager.remove(threadId);
-        threadMappingStore.remove(threadId);
-        thread
-          .send(
-            'セッションの復元に失敗しました。`/cc resume` で再開するか、`/cc new` で新しいセッションを開始してください。',
-          )
-          .catch((e) => console.error('Discord send error:', e));
-        return null;
-      }
-
-      log(
-        `セッション復元: ${mapping.workspaceName} [${mapping.sessionId.slice(0, 8)}...] (thread: ${threadId})`,
-      );
-      return restoredCtx;
-    })();
-
-    pendingRestorations.set(threadId, restorationPromise);
-    try {
-      return await restorationPromise;
-    } finally {
-      pendingRestorations.delete(threadId);
-    }
+    sessionId: string,
+    workspace: Workspace,
+  ): Promise<void> {
+    return threadMappingStore.set(threadId, {
+      sessionId,
+      workDir: workspace.path,
+      workspaceName: workspace.name,
+    });
   }
 
   // App 層
@@ -248,7 +196,7 @@ async function main(): Promise<void> {
 
     // セッションが見つからない場合、ディスクから遅延復元を試みる
     if (!ctx) {
-      ctx = await tryRestoreSession(msg.channelId, msg.channel as ThreadSender);
+      ctx = await sessionRestorer.tryRestore(msg.channelId, msg.channel as ThreadSender);
     }
 
     if (error && ctx) {
@@ -365,11 +313,7 @@ async function main(): Promise<void> {
         const ctx = createSession(thread.id, thread, workspace);
         ctx.session.restore(selectedSessionId);
 
-        threadMappingStore.set(thread.id, {
-          sessionId: selectedSessionId,
-          workDir: workspace.path,
-          workspaceName: workspace.name,
-        });
+        await persistMapping(thread.id, selectedSessionId, workspace);
 
         await thread.send(
           `セッションを再開しました [\`${selectedSessionId.slice(0, 8)}\`] — 📁 ${workspace.name}`,
@@ -425,11 +369,7 @@ async function main(): Promise<void> {
         ctx.session.reset();
         ctx.session.ensure(opts);
 
-        threadMappingStore.set(thread.id, {
-          sessionId: ctx.session.sessionId!,
-          workDir: workspace.path,
-          workspaceName: workspace.name,
-        });
+        await persistMapping(thread.id, ctx.session.sessionId!, workspace);
 
         await thread.send(
           `セッションを開始しました [\`${ctx.session.sessionId!.slice(0, 8)}\`] — 📁 ${workspace.name}${suffix}`,
@@ -684,11 +624,7 @@ async function main(): Promise<void> {
         ctx.session.reset();
         ctx.session.ensure(command.options);
 
-        threadMappingStore.set(thread.id, {
-          sessionId: ctx.session.sessionId!,
-          workDir: workspace.path,
-          workspaceName: workspace.name,
-        });
+        await persistMapping(thread.id, ctx.session.sessionId!, workspace);
 
         await thread.send(
           `セッションを開始しました [\`${ctx.session.sessionId!.slice(0, 8)}\`] — 📁 ${workspace.name}${suffix}`,

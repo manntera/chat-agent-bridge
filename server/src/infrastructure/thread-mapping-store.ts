@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
+import { writeFile, rename } from 'node:fs/promises';
 
 export interface ThreadMapping {
   sessionId: string;
@@ -13,6 +14,7 @@ interface ThreadMappingsFile {
 export class ThreadMappingStore {
   private mappings: Map<string, ThreadMapping>;
   private readonly filePath: string;
+  private pendingSave: Promise<void> = Promise.resolve();
 
   constructor(filePath: string) {
     this.filePath = filePath;
@@ -45,27 +47,35 @@ export class ThreadMappingStore {
     }
   }
 
-  /** ファイルに書き込み（temp+rename でアトミックに更新） */
-  private save(): void {
+  /** ファイルに非同期書き込み（temp+rename でアトミックに更新、直列化で競合を防止） */
+  private save(): Promise<void> {
+    this.pendingSave = this.pendingSave.then(
+      () => this.doSave(),
+      () => this.doSave(),
+    );
+    return this.pendingSave;
+  }
+
+  private async doSave(): Promise<void> {
     const data: ThreadMappingsFile = {
       mappings: Object.fromEntries(this.mappings),
     };
     const tmpPath = this.filePath + '.tmp';
-    writeFileSync(tmpPath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
-    renameSync(tmpPath, this.filePath);
+    await writeFile(tmpPath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+    await rename(tmpPath, this.filePath);
   }
 
   get(threadId: string): ThreadMapping | null {
     return this.mappings.get(threadId) ?? null;
   }
 
-  set(threadId: string, mapping: ThreadMapping): void {
+  async set(threadId: string, mapping: ThreadMapping): Promise<void> {
     this.mappings.set(threadId, mapping);
-    this.save();
+    await this.save();
   }
 
-  remove(threadId: string): void {
+  async remove(threadId: string): Promise<void> {
     this.mappings.delete(threadId);
-    this.save();
+    await this.save();
   }
 }
