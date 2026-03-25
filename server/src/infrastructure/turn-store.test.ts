@@ -75,6 +75,36 @@ describe('TurnStore', () => {
     });
   });
 
+  describe('findTurnAcrossSessions', () => {
+    it('他セッションの turns.json からメッセージ ID を逆引きできる', async () => {
+      const store = new TurnStore();
+      await store.record('session-A', '/work', 1, 'msg-A1');
+      await store.record('session-A', '/work', 2, 'msg-A2');
+      await store.record('session-B', '/work', 1, 'msg-B1');
+
+      const result = await store.findTurnAcrossSessions('/work', 'msg-A2');
+
+      expect(result).toEqual({ sessionId: 'session-A', turn: 2 });
+    });
+
+    it('どのセッションにも存在しない ID は null を返す', async () => {
+      const store = new TurnStore();
+      await store.record('session-A', '/work', 1, 'msg-A1');
+
+      const result = await store.findTurnAcrossSessions('/work', 'msg-999');
+
+      expect(result).toBeNull();
+    });
+
+    it('turns.json がゼロ件の場合は null を返す', async () => {
+      const store = new TurnStore();
+
+      const result = await store.findTurnAcrossSessions('/work', 'msg-111');
+
+      expect(result).toBeNull();
+    });
+  });
+
   describe('maxTurn', () => {
     it('最大ターン番号を返す', async () => {
       const store = new TurnStore();
