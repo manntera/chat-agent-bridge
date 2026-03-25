@@ -154,7 +154,7 @@ function getEmbeds(sent: SentItem[]): SendOptions[] {
 
 describe('統合テスト: コンポーネント配線', () => {
   describe('メッセージ → ClaudeCode → 結果通知', () => {
-    it('スレッド内のメッセージが ClaudeCode に送信され、結果が Embed で通知される', () => {
+    it('スレッド内のメッセージが ClaudeCode に送信され、結果がテキストで通知される', () => {
       const ctx = createIntegrationContext();
 
       ctx.handleMessage(validMessage('テストを書いて'));
@@ -170,11 +170,9 @@ describe('統合テスト: コンポーネント配線', () => {
       sendStdout(proc, JSON.stringify({ type: 'result', result: '完了しました' }));
       simulateClose(proc, 0);
 
-      // result は usage 到着後に Embed で送信される
-      const embeds = getEmbeds(ctx.sent);
-      expect(embeds).toHaveLength(1);
-      expect(embeds[0].embeds[0].description).toBe('完了しました');
-      expect(embeds[0].embeds[0].color).toBe(0x00c853);
+      // result は usage 到着後にプレーンテキストで送信される
+      const textMessages = getTextMessages(ctx.sent);
+      expect(textMessages).toContain('完了しました');
     });
 
     it('連続したメッセージが同一セッションで処理される', () => {
@@ -202,15 +200,14 @@ describe('統合テスト: コンポーネント配線', () => {
       sendStdout(proc2, JSON.stringify({ type: 'result', result: '結果2' }));
       simulateClose(proc2, 0);
 
-      const embeds = getEmbeds(ctx.sent);
-      expect(embeds).toHaveLength(2);
-      expect(embeds[0].embeds[0].description).toBe('結果1');
-      expect(embeds[1].embeds[0].description).toBe('結果2');
+      const textMessages = getTextMessages(ctx.sent);
+      expect(textMessages).toContain('結果1');
+      expect(textMessages).toContain('結果2');
     });
   });
 
   describe('途中経過のリアルタイム通知', () => {
-    it('ツール使用イベントがプレーンテキストで通知される', async () => {
+    it('ツール使用イベントが Embed で通知される', async () => {
       const ctx = createIntegrationContext();
 
       ctx.handleMessage(validMessage('ファイルを編集して'));
@@ -237,11 +234,13 @@ describe('統合テスト: コンポーネント配線', () => {
         }),
       );
 
-      const textMessages = getTextMessages(ctx.sent);
-      expect(textMessages).toContain('🔧 Edit: src/index.ts');
+      const embeds = getEmbeds(ctx.sent);
+      const toolEmbed = embeds.find((e) => e.embeds[0].description?.includes('Edit'));
+      expect(toolEmbed).toBeDefined();
+      expect(toolEmbed!.embeds[0].description).toContain('src/index.ts');
     });
 
-    it('拡張思考イベントがプレーンテキストで通知される', async () => {
+    it('拡張思考イベントが Embed で通知される', async () => {
       const ctx = createIntegrationContext();
 
       ctx.handleMessage(validMessage('分析して'));
@@ -261,8 +260,9 @@ describe('統合テスト: コンポーネント配線', () => {
         }),
       );
 
-      const textMessages = getTextMessages(ctx.sent);
-      expect(textMessages).toContain('💭 コードを分析中...');
+      const embeds = getEmbeds(ctx.sent);
+      const thinkingEmbed = embeds.find((e) => e.embeds[0].description?.includes('コードを分析中'));
+      expect(thinkingEmbed).toBeDefined();
     });
   });
 
@@ -353,10 +353,11 @@ describe('統合テスト: コンポーネント配線', () => {
       simulateClose(proc, 1);
 
       // error は usage 到着後に Embed で送信される
+      // progress の started embed も含まれるので、エラー embed を探す
       const embeds = getEmbeds(ctx.sent);
-      expect(embeds).toHaveLength(1);
-      expect(embeds[0].embeds[0].color).toBe(0xff1744);
-      expect(embeds[0].embeds[0].title).toContain('エラー');
+      const errorEmbed = embeds.find((e) => e.embeds[0].color === 0xff1744);
+      expect(errorEmbed).toBeDefined();
+      expect(errorEmbed!.embeds[0].title).toContain('エラー');
     });
   });
 

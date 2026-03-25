@@ -206,15 +206,17 @@ describe('統合テスト', () => {
       sendUserMessage(ctx, 'テストを書いて');
       expect(ctx.orchestrator.state).toBe('busy');
       expect(ctx.mockSpawnFn).toHaveBeenCalledTimes(1);
-      // started 通知
+      // started 通知 (Embed)
       expect(ctx.sent).toHaveLength(2);
-      expect(ctx.sent[1].content).toBe('📨 受信しました。処理を開始します...');
+      const startedEmbed = ctx.sent[1].content as SendOptions;
+      expect(startedEmbed.embeds[0].description).toBe('📨 受信しました。処理を開始します...');
 
-      // 3. tool_use 進捗
+      // 3. tool_use 進捗 (Embed)
       const proc = latestProcess(ctx);
       sendToolUse(proc, 'Edit', 'src/app.ts');
       expect(ctx.sent).toHaveLength(3);
-      expect(ctx.sent[2].content).toBe('🔧 Edit: src/app.ts');
+      const toolEmbed = ctx.sent[2].content as SendOptions;
+      expect(toolEmbed.embeds[0].description).toBe('🔧 Edit: src/app.ts');
 
       // 4. 結果 + 終了
       sendResult(proc, '完了しました');
@@ -224,11 +226,11 @@ describe('統合テスト', () => {
       expect(ctx.orchestrator.state).toBe('idle');
       expect(ctx.usageFetcher.fetch).toHaveBeenCalledTimes(1);
 
-      // result + usage → Embed で送信される
-      const lastSent = ctx.sent[ctx.sent.length - 1].content as SendOptions;
-      expect(lastSent.embeds).toHaveLength(1);
-      expect(lastSent.embeds[0].description).toBe('完了しました');
-      expect(lastSent.embeds[0].color).toBe(0x00c853);
+      // result + usage → プレーンテキストで送信される
+      const resultMsg = ctx.sent.find(
+        (s) => typeof s.content === 'string' && s.content === '完了しました',
+      );
+      expect(resultMsg).toBeDefined();
     });
 
     it('新セッションでは resume=false で spawn される', () => {
@@ -359,8 +361,10 @@ describe('統合テスト', () => {
       await waitForUsage();
 
       expect(ctx.orchestrator.state).toBe('idle');
-      const lastSent = ctx.sent[ctx.sent.length - 1].content as SendOptions;
-      expect(lastSent.embeds[0].description).toBe('続きの結果');
+      const resultMsg = ctx.sent.find(
+        (s) => typeof s.content === 'string' && s.content === '続きの結果',
+      );
+      expect(resultMsg).toBeDefined();
     });
   });
 
@@ -469,13 +473,11 @@ describe('統合テスト', () => {
       simulateClose(proc, 0);
       await waitForUsage();
 
-      // Embed 送信時に content にメンションが含まれる
-      const embedSent = ctx.sent.find((s) => {
-        if (typeof s.content === 'string') return false;
-        const opts = s.content as SendOptions;
-        return opts.content === '<@user-1>';
-      });
-      expect(embedSent).toBeDefined();
+      // テキスト送信時にメンションが含まれる
+      const mentionSent = ctx.sent.find(
+        (s) => typeof s.content === 'string' && (s.content as string).startsWith('<@user-1>'),
+      );
+      expect(mentionSent).toBeDefined();
     });
   });
 
@@ -498,13 +500,11 @@ describe('統合テスト', () => {
       await waitForUsage();
 
       expect(ctx.orchestrator.state).toBe('idle');
-      // result Embed は送信される
-      const embedSent = ctx.sent.find((s) => {
-        if (typeof s.content === 'string') return false;
-        const opts = s.content as SendOptions;
-        return opts.embeds?.[0]?.description === '結果です';
-      });
-      expect(embedSent).toBeDefined();
+      // result はプレーンテキストで送信される
+      const resultMsg = ctx.sent.find(
+        (s) => typeof s.content === 'string' && (s.content as string).includes('結果です'),
+      );
+      expect(resultMsg).toBeDefined();
     });
   });
 });
