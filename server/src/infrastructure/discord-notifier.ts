@@ -13,7 +13,7 @@ export interface SendOptions {
 }
 
 export interface ThreadSender {
-  send(content: string | SendOptions): Promise<unknown>;
+  send(content: string | SendOptions): Promise<{ id: string }>;
   sendTyping(): Promise<unknown>;
   setName(name: string): Promise<unknown>;
 }
@@ -59,6 +59,7 @@ type PendingResult =
 export interface Notifier {
   notify: NotifyFn;
   setAuthorId(authorId: string): void;
+  onResultSent: ((discordMessageId: string) => void) | null;
   dispose(): void;
 }
 
@@ -79,6 +80,7 @@ export function createNotifier(thread: ThreadSender): Notifier {
   let currentAuthorId: string | null = null;
   let typingInterval: NodeJS.Timeout | null = null;
   let isTyping = false;
+  let resultSentCallback: ((discordMessageId: string) => void) | null = null;
 
   function mention(): string | null {
     return currentAuthorId ? `<@${currentAuthorId}>` : null;
@@ -103,12 +105,16 @@ export function createNotifier(thread: ThreadSender): Notifier {
     }
   }
 
-  function sendText(text: string): void {
-    thread.send(text).then(
-      () => {
+  function sendText(text: string): Promise<{ id: string }> {
+    return thread.send(text).then(
+      (msg) => {
         if (isTyping) fireTyping();
+        return msg;
       },
-      (err) => console.error('Discord send error:', err),
+      (err) => {
+        console.error('Discord send error:', err);
+        return { id: '' };
+      },
     );
   }
 
@@ -144,10 +150,14 @@ export function createNotifier(thread: ThreadSender): Notifier {
       const rest = result.text.slice(firstChunkMax);
       const chunks = rest.length > 0 ? [firstChunk, ...splitMessage(rest, 2000)] : [firstChunk];
       for (let i = 0; i < chunks.length; i++) {
-        if (i === 0 && mentionPrefix) {
-          sendText(`${mentionPrefix}${chunks[i]}`);
-        } else {
-          sendText(chunks[i]);
+        const text = i === 0 && mentionPrefix ? `${mentionPrefix}${chunks[i]}` : chunks[i];
+        const p = sendText(text);
+        // 最初のメッセージの ID をコールバックで通知
+        if (i === 0 && resultSentCallback) {
+          const cb = resultSentCallback;
+          p.then((msg) => {
+            if (msg.id) cb(msg.id);
+          }).catch(() => {});
         }
       }
       if (footer) {
@@ -190,13 +200,20 @@ export function createNotifier(thread: ThreadSender): Notifier {
     }
   };
 
-  return {
+  const notifier: Notifier = {
     notify,
     setAuthorId(authorId: string) {
       currentAuthorId = authorId;
+    },
+    get onResultSent() {
+      return resultSentCallback;
+    },
+    set onResultSent(cb: ((discordMessageId: string) => void) | null) {
+      resultSentCallback = cb;
     },
     dispose() {
       stopTyping();
     },
   };
+  return notifier;
 }

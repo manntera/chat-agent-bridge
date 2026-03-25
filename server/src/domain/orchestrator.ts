@@ -12,6 +12,7 @@ import type {
 export class Orchestrator {
   private interruptReason: 'new' | 'interrupt' | null = null;
   private pendingNewOptions: SessionOptions = {};
+  private turnCount = 0;
 
   constructor(
     private readonly session: Session,
@@ -19,6 +20,10 @@ export class Orchestrator {
     private readonly notify: NotifyFn,
     private readonly usageFetcher?: IUsageFetcher,
   ) {}
+
+  get currentTurn(): number {
+    return this.turnCount;
+  }
 
   get state(): OrchestratorState {
     if (this.claudeProcess.isRunning) {
@@ -43,6 +48,7 @@ export class Orchestrator {
         } else if (state === 'busy' || state === 'interrupting') {
           this.notify({ type: 'info', message: '処理中です' });
         } else {
+          this.turnCount++;
           this.notify({ type: 'progress', event: { kind: 'started' } });
           const sessionId = this.session.sessionId!;
           const resume = !this.session.isNew;
@@ -84,6 +90,23 @@ export class Orchestrator {
             type: 'info',
             message: `セッションを再開しました [${this.formatSessionId()}]`,
           });
+        }
+        break;
+
+      case 'rewind':
+        if (state === 'idle') {
+          this.session.reset();
+          this.session.restore(command.newSessionId);
+          this.turnCount = command.targetTurn;
+          this.notify({
+            type: 'info',
+            message: `⏪ Turn ${command.targetTurn} まで巻き戻しました`,
+          });
+          if (command.prompt) {
+            this.handleCommand({ type: 'prompt', text: command.prompt });
+          }
+        } else if (state === 'busy' || state === 'interrupting') {
+          this.notify({ type: 'info', message: '処理中です' });
         }
         break;
     }

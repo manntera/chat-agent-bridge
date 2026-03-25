@@ -30,6 +30,8 @@ import { getDayBoundary } from './infrastructure/session-store.js';
 import { UsageFetcher } from './infrastructure/usage-fetcher.js';
 import { SessionRestorer } from './infrastructure/session-restorer.js';
 import { ThreadMappingStore } from './infrastructure/thread-mapping-store.js';
+import { TurnStore } from './infrastructure/turn-store.js';
+import { SessionBrancher } from './infrastructure/session-brancher.js';
 import { WorkspaceStore, listDirectories } from './infrastructure/workspace-store.js';
 import {
   formatRelativeDate,
@@ -82,6 +84,8 @@ async function main(): Promise<void> {
   const usageFetcher = new UsageFetcher();
   const titleGenerator = config.geminiApiKey ? new TitleGenerator(config.geminiApiKey) : null;
   const reportGenerator = config.geminiApiKey ? new ReportGenerator(config.geminiApiKey) : null;
+  const turnStore = new TurnStore();
+  const sessionBrancher = new SessionBrancher(turnStore);
 
   /** セッションコンテキストを作成し SessionManager に登録する */
   function createSession(
@@ -107,6 +111,16 @@ async function main(): Promise<void> {
     };
 
     const orchestrator = new Orchestrator(session, claudeProcess, notify, usageFetcher);
+
+    // ターン記録コールバックを設定
+    notifier.onResultSent = (discordMessageId) => {
+      const sid = session.sessionId;
+      if (sid) {
+        turnStore
+          .record(sid, workspace.path, orchestrator.currentTurn, discordMessageId)
+          .catch((err) => console.error('Turn record error:', err));
+      }
+    };
 
     onProgress = (event) => orchestrator.onProgress(event);
     onProcessEnd = (exitCode, output) => {
@@ -207,6 +221,45 @@ async function main(): Promise<void> {
     if (ctx) {
       ctx.setAuthorId(msg.author.id);
     }
+
+    // リプライ検出（巻き戻し）
+    if (msg.reference?.messageId && ctx?.session.sessionId) {
+      const referencedId = msg.reference.messageId;
+      const turn = await turnStore.findTurn(
+        ctx.session.sessionId,
+        ctx.session.workDir,
+        referencedId,
+      );
+
+      if (turn !== null) {
+        if (ctx.orchestrator.state !== 'idle') {
+          ctx.orchestrator.handleCommand({ type: 'prompt', text: prompt });
+          return;
+        }
+
+        try {
+          const newSessionId = await sessionBrancher.branch(
+            ctx.session.sessionId,
+            ctx.session.workDir,
+            turn,
+          );
+          log(`巻き戻し: Turn ${turn} → 新セッション ${newSessionId.slice(0, 8)} (thread: ${msg.channelId})`);
+
+          ctx.orchestrator.handleCommand({
+            type: 'rewind',
+            targetTurn: turn,
+            newSessionId,
+            prompt,
+          });
+        } catch (err) {
+          console.error('Rewind error:', err);
+          msg.channel.send('巻き戻しに失敗しました').catch(() => {});
+        }
+        return;
+      }
+      // turn が見つからない場合 → 通常メッセージとして処理
+    }
+
     const prevState = ctx?.orchestrator.state;
 
     handleMessage({
