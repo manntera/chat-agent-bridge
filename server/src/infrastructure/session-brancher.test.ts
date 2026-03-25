@@ -150,4 +150,16 @@ describe('SessionBrancher', () => {
     expect(turn2).toBe(2);
     expect(turn3).toBeNull();
   });
+
+  it('targetTurn が実際のターン数を超える場合にエラーを投げる', async () => {
+    const turnStore = new TurnStore();
+    const brancher = new SessionBrancher(turnStore);
+
+    const lines = [userLine('質問1'), assistantLine('回答1')];
+    await writeFile(join(projDir, 'original.jsonl'), lines.join('\n'));
+
+    await expect(brancher.branch('original', '/work', 5)).rejects.toThrow(
+      'Turn 5 が見つかりません（全 1 ターン）',
+    );
+  });
 });

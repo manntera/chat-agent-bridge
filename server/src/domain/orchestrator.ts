@@ -25,6 +25,11 @@ export class Orchestrator {
     return this.turnCount;
   }
 
+  /** 永続化されたターンカウンタを復元する */
+  restoreTurnCount(turn: number): void {
+    this.turnCount = turn;
+  }
+
   get state(): OrchestratorState {
     if (this.claudeProcess.isRunning) {
       return this.interruptReason !== null ? 'interrupting' : 'busy';

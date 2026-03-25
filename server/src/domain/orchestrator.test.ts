@@ -716,6 +716,17 @@ describe('Orchestrator', () => {
       expect(ctx.orchestrator.currentTurn).toBe(1);
     });
 
+    it('restoreTurnCount で turnCount を復元できる', () => {
+      const ctx = createOrchestrator();
+      toIdle(ctx);
+
+      ctx.orchestrator.restoreTurnCount(5);
+      expect(ctx.orchestrator.currentTurn).toBe(5);
+
+      ctx.orchestrator.handleMessage('prompt');
+      expect(ctx.orchestrator.currentTurn).toBe(6);
+    });
+
     it('rewind 後に currentTurn が正しくリセットされる', () => {
       const ctx = createOrchestrator();
       toIdleAfterTask(ctx);

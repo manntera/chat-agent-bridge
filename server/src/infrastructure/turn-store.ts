@@ -55,6 +55,13 @@ export class TurnStore {
     await writeFile(turnsFilePath(targetSessionId, workDir), JSON.stringify(targetMap, null, 2));
   }
 
+  /** セッションの最大ターン番号を返す（データがなければ 0） */
+  async maxTurn(sessionId: string, workDir: string): Promise<number> {
+    const map = await this.load(turnsFilePath(sessionId, workDir));
+    const turns = Object.keys(map).map(Number);
+    return turns.length > 0 ? Math.max(...turns) : 0;
+  }
+
   private async load(filePath: string): Promise<TurnMap> {
     try {
       const data = await readFile(filePath, 'utf-8');

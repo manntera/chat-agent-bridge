@@ -55,7 +55,7 @@ function createIntegrationContext() {
   const thread: ThreadSender = {
     send: vi.fn((content) => {
       sent.push({ content });
-      return Promise.resolve();
+      return Promise.resolve({ id: '' });
     }),
     sendTyping: vi.fn(() => Promise.resolve()),
     setName: vi.fn(() => Promise.resolve()),

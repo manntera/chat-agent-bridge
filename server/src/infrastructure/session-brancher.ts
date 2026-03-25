@@ -37,6 +37,10 @@ export class SessionBrancher {
       }
     }
 
+    if (cutIndex === 0) {
+      throw new Error(`Turn ${targetTurn} が見つかりません（全 ${turnCount} ターン）`);
+    }
+
     const newSessionId = randomUUID();
     const newLines = lines.slice(0, cutIndex);
     const newPath = join(dir, `${newSessionId}.jsonl`);

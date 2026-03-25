@@ -243,7 +243,9 @@ async function main(): Promise<void> {
             ctx.session.workDir,
             turn,
           );
-          log(`巻き戻し: Turn ${turn} → 新セッション ${newSessionId.slice(0, 8)} (thread: ${msg.channelId})`);
+          log(
+            `巻き戻し: Turn ${turn} → 新セッション ${newSessionId.slice(0, 8)} (thread: ${msg.channelId})`,
+          );
 
           ctx.orchestrator.handleCommand({
             type: 'rewind',
@@ -366,6 +368,10 @@ async function main(): Promise<void> {
 
         const ctx = createSession(thread.id, thread, workspace);
         ctx.session.restore(selectedSessionId);
+
+        // ターンカウンタを復元
+        const maxTurn = await turnStore.maxTurn(selectedSessionId, workspace.path);
+        ctx.orchestrator.restoreTurnCount(maxTurn);
 
         await persistMapping(thread.id, selectedSessionId, workspace);
 

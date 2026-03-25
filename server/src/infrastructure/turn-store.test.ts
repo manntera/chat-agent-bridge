@@ -75,6 +75,27 @@ describe('TurnStore', () => {
     });
   });
 
+  describe('maxTurn', () => {
+    it('最大ターン番号を返す', async () => {
+      const store = new TurnStore();
+      await store.record('session-1', '/work', 1, 'msg-111');
+      await store.record('session-1', '/work', 2, 'msg-222');
+      await store.record('session-1', '/work', 3, 'msg-333');
+
+      const max = await store.maxTurn('session-1', '/work');
+
+      expect(max).toBe(3);
+    });
+
+    it('データがない場合は 0 を返す', async () => {
+      const store = new TurnStore();
+
+      const max = await store.maxTurn('nonexistent', '/work');
+
+      expect(max).toBe(0);
+    });
+  });
+
   describe('copyTo', () => {
     it('指定ターンまでのエントリがコピーされる', async () => {
       const store = new TurnStore();
