@@ -174,6 +174,22 @@ describe('ThreadMappingStore', () => {
     warnSpy.mockRestore();
   });
 
+  it('不正な形式のファイル（mappingsが配列）の場合は空マップで開始する', () => {
+    const filePath = join(tempDir, 'thread-sessions.json');
+    writeFileSync(filePath, JSON.stringify({ mappings: ['not', 'an', 'object'] }), 'utf-8');
+
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const store = new ThreadMappingStore(filePath);
+
+    expect(store.get('thread-1')).toBeNull();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('thread-sessions.json の形式が不正です'),
+    );
+
+    warnSpy.mockRestore();
+  });
+
   it('複数のマッピングを管理できる', () => {
     const filePath = join(tempDir, 'thread-sessions.json');
     const store = new ThreadMappingStore(filePath);

@@ -143,6 +143,75 @@ async function main(): Promise<void> {
     return ctx;
   }
 
+  /**
+   * ディスクのマッピングからセッションを遅延復元する。
+   * 並行メッセージによる二重復元を pendingRestorations で排他制御する。
+   */
+  async function tryRestoreSession(
+    threadId: string,
+    thread: ThreadSender,
+  ): Promise<SessionContext | null> {
+    // 別のメッセージが既に復元中なら、その完了を待つ
+    const pending = pendingRestorations.get(threadId);
+    if (pending) {
+      return pending;
+    }
+
+    const mapping = threadMappingStore.get(threadId);
+    if (!mapping) return null;
+
+    const restorationPromise = (async (): Promise<SessionContext | null> => {
+      // workDir の存在チェック（ディレクトリであることも確認）
+      try {
+        const s = await stat(mapping.workDir);
+        if (!s.isDirectory()) throw new Error('Not a directory');
+      } catch {
+        thread
+          .send(
+            'セッションの復元に失敗しました。ワークディレクトリが見つかりません。`/cc resume` で再開するか、`/cc new` で新しいセッションを開始してください。',
+          )
+          .catch((err) => console.error('Discord send error:', err));
+        threadMappingStore.remove(threadId);
+        return null;
+      }
+
+      // セッション作成・復元
+      // NOTE: createSession は ClaudeProcess を生成して sessionManager に登録する。
+      // restore() が失敗した場合は sessionManager.remove() で登録を解除する。
+      // 現時点では ClaudeProcess はspawn前なのでリソースリークは発生しないが、
+      // 将来 ClaudeProcess のコンストラクタが変更された場合は明示的な破棄が必要になりうる。
+      const restoredCtx = createSession(threadId, thread, {
+        name: mapping.workspaceName,
+        path: mapping.workDir,
+      });
+      try {
+        restoredCtx.session.restore(mapping.sessionId);
+      } catch (err) {
+        console.error('Session restore error:', err);
+        sessionManager.remove(threadId);
+        threadMappingStore.remove(threadId);
+        thread
+          .send(
+            'セッションの復元に失敗しました。`/cc resume` で再開するか、`/cc new` で新しいセッションを開始してください。',
+          )
+          .catch((e) => console.error('Discord send error:', e));
+        return null;
+      }
+
+      log(
+        `セッション復元: ${mapping.workspaceName} [${mapping.sessionId.slice(0, 8)}...] (thread: ${threadId})`,
+      );
+      return restoredCtx;
+    })();
+
+    pendingRestorations.set(threadId, restorationPromise);
+    try {
+      return await restorationPromise;
+    } finally {
+      pendingRestorations.delete(threadId);
+    }
+  }
+
   // App 層
   const handleMessage = createMessageHandler(accessControl, sessionManager);
 
@@ -179,61 +248,7 @@ async function main(): Promise<void> {
 
     // セッションが見つからない場合、ディスクから遅延復元を試みる
     if (!ctx) {
-      // 別のメッセージが既に復元中なら、その完了を待つ
-      const pending = pendingRestorations.get(msg.channelId);
-      if (pending) {
-        ctx = await pending;
-      } else {
-        const mapping = threadMappingStore.get(msg.channelId);
-        if (mapping) {
-          const restorationPromise = (async (): Promise<SessionContext | null> => {
-            // workDir の存在チェック（ディレクトリであることも確認）
-            try {
-              const s = await stat(mapping.workDir);
-              if (!s.isDirectory()) throw new Error('Not a directory');
-            } catch {
-              msg.channel
-                .send(
-                  'セッションの復元に失敗しました。ワークディレクトリが見つかりません。`/cc resume` で再開するか、`/cc new` で新しいセッションを開始してください。',
-                )
-                .catch((err) => console.error('Discord send error:', err));
-              threadMappingStore.remove(msg.channelId);
-              return null;
-            }
-
-            // セッション作成・復元
-            const restoredCtx = createSession(msg.channelId, msg.channel as ThreadSender, {
-              name: mapping.workspaceName,
-              path: mapping.workDir,
-            });
-            try {
-              restoredCtx.session.restore(mapping.sessionId);
-            } catch (err) {
-              console.error('Session restore error:', err);
-              sessionManager.remove(msg.channelId);
-              threadMappingStore.remove(msg.channelId);
-              msg.channel
-                .send(
-                  'セッションの復元に失敗しました。`/cc resume` で再開するか、`/cc new` で新しいセッションを開始してください。',
-                )
-                .catch((e) => console.error('Discord send error:', e));
-              return null;
-            }
-
-            log(
-              `セッション復元: ${mapping.workspaceName} [${mapping.sessionId.slice(0, 8)}...] (thread: ${msg.channelId})`,
-            );
-            return restoredCtx;
-          })();
-
-          pendingRestorations.set(msg.channelId, restorationPromise);
-          try {
-            ctx = await restorationPromise;
-          } finally {
-            pendingRestorations.delete(msg.channelId);
-          }
-        }
-      }
+      ctx = await tryRestoreSession(msg.channelId, msg.channel as ThreadSender);
     }
 
     if (error && ctx) {

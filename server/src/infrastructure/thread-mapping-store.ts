@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 
 export interface ThreadMapping {
   sessionId: string;
@@ -29,7 +29,7 @@ export class ThreadMappingStore {
     try {
       const raw = readFileSync(this.filePath, 'utf-8');
       const parsed: ThreadMappingsFile = JSON.parse(raw);
-      if (parsed.mappings && typeof parsed.mappings === 'object') {
+      if (parsed.mappings && typeof parsed.mappings === 'object' && !Array.isArray(parsed.mappings)) {
         this.mappings = new Map(Object.entries(parsed.mappings));
       } else {
         console.warn(`thread-sessions.json の形式が不正です: ${this.filePath}`);
@@ -41,12 +41,14 @@ export class ThreadMappingStore {
     }
   }
 
-  /** ファイルに書き込み（同期I/O: マッピング数が大幅に増えた場合は非同期化を検討） */
+  /** ファイルに書き込み（temp+rename でアトミックに更新） */
   private save(): void {
     const data: ThreadMappingsFile = {
       mappings: Object.fromEntries(this.mappings),
     };
-    writeFileSync(this.filePath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+    const tmpPath = this.filePath + '.tmp';
+    writeFileSync(tmpPath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
+    renameSync(tmpPath, this.filePath);
   }
 
   get(threadId: string): ThreadMapping | null {
