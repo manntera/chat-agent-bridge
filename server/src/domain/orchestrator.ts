@@ -12,6 +12,7 @@ import type {
 export class Orchestrator {
   private interruptReason: 'new' | 'interrupt' | null = null;
   private pendingNewOptions: SessionOptions = {};
+  private turnCount = 0;
 
   constructor(
     private readonly session: Session,
@@ -19,6 +20,15 @@ export class Orchestrator {
     private readonly notify: NotifyFn,
     private readonly usageFetcher?: IUsageFetcher,
   ) {}
+
+  get currentTurn(): number {
+    return this.turnCount;
+  }
+
+  /** 永続化されたターンカウンタを復元する */
+  restoreTurnCount(turn: number): void {
+    this.turnCount = turn;
+  }
 
   get state(): OrchestratorState {
     if (this.claudeProcess.isRunning) {
@@ -43,6 +53,7 @@ export class Orchestrator {
         } else if (state === 'busy' || state === 'interrupting') {
           this.notify({ type: 'info', message: '処理中です' });
         } else {
+          this.turnCount++;
           this.notify({ type: 'progress', event: { kind: 'started' } });
           const sessionId = this.session.sessionId!;
           const resume = !this.session.isNew;
@@ -83,6 +94,34 @@ export class Orchestrator {
           this.notify({
             type: 'info',
             message: `セッションを再開しました [${this.formatSessionId()}]`,
+          });
+        }
+        break;
+
+      case 'rewind':
+        if (state === 'idle') {
+          if (!command.newSessionId) {
+            this.notify({
+              type: 'info',
+              message: '巻き戻しに失敗しました（セッションIDが不正です）',
+            });
+            break;
+          }
+          const prevOptions = { ...this.session.options };
+          this.session.reset();
+          this.session.restore(command.newSessionId, prevOptions);
+          this.turnCount = command.targetTurn;
+          this.notify({
+            type: 'info',
+            message: `⏪ Turn ${command.targetTurn} まで巻き戻しました [${command.newSessionId.slice(0, 8)}]`,
+          });
+          if (command.prompt) {
+            this.handleCommand({ type: 'prompt', text: command.prompt });
+          }
+        } else if (state === 'busy' || state === 'interrupting') {
+          this.notify({
+            type: 'info',
+            message: '処理中のため巻き戻しできません。完了後に再度お試しください。',
           });
         }
         break;

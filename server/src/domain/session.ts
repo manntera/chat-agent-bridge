@@ -38,10 +38,10 @@ export class Session {
     return this._sessionId;
   }
 
-  restore(sessionId: string): void {
+  restore(sessionId: string, options: SessionOptions = {}): void {
     this._sessionId = sessionId;
     this._isNew = false;
-    this._options = {};
+    this._options = options;
   }
 
   reset(): void {

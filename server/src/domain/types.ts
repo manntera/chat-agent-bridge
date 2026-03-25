@@ -11,7 +11,8 @@ export type Command =
   | { type: 'new'; options: SessionOptions }
   | { type: 'interrupt' }
   | { type: 'prompt'; text: string }
-  | { type: 'resume'; sessionId: string };
+  | { type: 'resume'; sessionId: string }
+  | { type: 'rewind'; targetTurn: number; newSessionId: string; prompt?: string };
 
 export type ProgressEvent =
   | { kind: 'started' }

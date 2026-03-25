@@ -607,6 +607,189 @@ describe('Orchestrator', () => {
     });
   });
 
+  // ----- Rewind コマンド -----
+
+  describe('Rewind コマンド', () => {
+    it('Idle + rewind → セッション切り替え + ターンカウンタリセット', () => {
+      const ctx = createOrchestrator();
+      toIdleAfterTask(ctx);
+
+      ctx.orchestrator.handleCommand({
+        type: 'rewind',
+        targetTurn: 1,
+        newSessionId: 'branched-session-id',
+        prompt: '新しいプロンプト',
+      });
+
+      expect(ctx.session.sessionId).toBe('branched-session-id');
+      expect(ctx.orchestrator.currentTurn).toBe(2); // rewind で 1 にリセット + prompt で +1
+      expect(ctx.orchestrator.state).toBe('busy');
+    });
+
+    it('rewind の巻き戻し通知が送られる', () => {
+      const ctx = createOrchestrator();
+      toIdleAfterTask(ctx);
+
+      ctx.orchestrator.handleCommand({
+        type: 'rewind',
+        targetTurn: 2,
+        newSessionId: 'branched-id',
+        prompt: 'やり直し',
+      });
+
+      expect(ctx.notifications[0]).toEqual({
+        type: 'info',
+        message: '⏪ Turn 2 まで巻き戻しました [branched]',
+      });
+    });
+
+    it('prompt が空の場合は巻き戻しのみ実行', () => {
+      const ctx = createOrchestrator();
+      toIdleAfterTask(ctx);
+
+      ctx.orchestrator.handleCommand({
+        type: 'rewind',
+        targetTurn: 1,
+        newSessionId: 'branched-id',
+        prompt: '',
+      });
+
+      expect(ctx.orchestrator.state).toBe('idle');
+      expect(ctx.orchestrator.currentTurn).toBe(1);
+      expect(ctx.notifications).toHaveLength(1);
+    });
+
+    it('Busy + rewind → 「処理中のため巻き戻しできません」通知', () => {
+      const ctx = createOrchestrator();
+      toBusy(ctx);
+
+      ctx.orchestrator.handleCommand({
+        type: 'rewind',
+        targetTurn: 1,
+        newSessionId: 'branched-id',
+        prompt: 'test',
+      });
+
+      expect(ctx.orchestrator.state).toBe('busy');
+      expect(ctx.notifications[0]).toEqual({
+        type: 'info',
+        message: '処理中のため巻き戻しできません。完了後に再度お試しください。',
+      });
+    });
+
+    it('Initial + rewind → 何もしない', () => {
+      const { orchestrator, notifications } = createOrchestrator();
+
+      orchestrator.handleCommand({
+        type: 'rewind',
+        targetTurn: 1,
+        newSessionId: 'branched-id',
+        prompt: 'test',
+      });
+
+      expect(orchestrator.state).toBe('initial');
+      expect(notifications).toHaveLength(0);
+    });
+
+    it('Idle + rewind で newSessionId が空 → セッション変更せずエラー通知', () => {
+      const ctx = createOrchestrator();
+      toIdleAfterTask(ctx);
+      const prevSessionId = ctx.session.sessionId;
+
+      ctx.orchestrator.handleCommand({
+        type: 'rewind',
+        targetTurn: 1,
+        newSessionId: '',
+        prompt: 'test',
+      });
+
+      expect(ctx.session.sessionId).toBe(prevSessionId);
+      expect(ctx.orchestrator.state).toBe('idle');
+      expect(ctx.notifications[0]).toEqual({
+        type: 'info',
+        message: '巻き戻しに失敗しました（セッションIDが不正です）',
+      });
+    });
+
+    it('rewind 後もセッションオプション (model/effort) が引き継がれる', () => {
+      const ctx = createOrchestrator();
+      ctx.orchestrator.handleCommand({
+        type: 'new',
+        options: { model: 'opus', effort: 'max' },
+      });
+      ctx.notifications.length = 0;
+
+      // Busy → Idle
+      ctx.orchestrator.handleMessage('prompt');
+      ctx.mockProcess.simulateEnd();
+      ctx.orchestrator.onProcessEnd(0, 'done');
+      ctx.notifications.length = 0;
+
+      ctx.orchestrator.handleCommand({
+        type: 'rewind',
+        targetTurn: 1,
+        newSessionId: 'branched-id',
+        prompt: '',
+      });
+
+      expect(ctx.session.options).toEqual({ model: 'opus', effort: 'max' });
+    });
+  });
+
+  // ----- ターンカウンタ -----
+
+  describe('ターンカウンタ', () => {
+    it('prompt 処理のたびに currentTurn がインクリメントされる', () => {
+      const ctx = createOrchestrator();
+      toIdle(ctx);
+      expect(ctx.orchestrator.currentTurn).toBe(0);
+
+      ctx.orchestrator.handleMessage('prompt 1');
+      expect(ctx.orchestrator.currentTurn).toBe(1);
+
+      ctx.mockProcess.simulateEnd();
+      ctx.orchestrator.onProcessEnd(0, 'done');
+
+      ctx.orchestrator.handleMessage('prompt 2');
+      expect(ctx.orchestrator.currentTurn).toBe(2);
+    });
+
+    it('Busy 中の prompt は turnCount をインクリメントしない', () => {
+      const ctx = createOrchestrator();
+      toBusy(ctx);
+      expect(ctx.orchestrator.currentTurn).toBe(1);
+
+      ctx.orchestrator.handleMessage('rejected prompt');
+      expect(ctx.orchestrator.currentTurn).toBe(1);
+    });
+
+    it('restoreTurnCount で turnCount を復元できる', () => {
+      const ctx = createOrchestrator();
+      toIdle(ctx);
+
+      ctx.orchestrator.restoreTurnCount(5);
+      expect(ctx.orchestrator.currentTurn).toBe(5);
+
+      ctx.orchestrator.handleMessage('prompt');
+      expect(ctx.orchestrator.currentTurn).toBe(6);
+    });
+
+    it('rewind 後に currentTurn が正しくリセットされる', () => {
+      const ctx = createOrchestrator();
+      toIdleAfterTask(ctx);
+      expect(ctx.orchestrator.currentTurn).toBe(1);
+
+      ctx.orchestrator.handleCommand({
+        type: 'rewind',
+        targetTurn: 1,
+        newSessionId: 'branched-id',
+        prompt: '',
+      });
+
+      expect(ctx.orchestrator.currentTurn).toBe(1);
+    });
+  });
+
   // ----- 複合シナリオ -----
 
   describe('複合シナリオ', () => {
