@@ -12,7 +12,7 @@ export type Command =
   | { type: 'interrupt' }
   | { type: 'prompt'; text: string }
   | { type: 'resume'; sessionId: string }
-  | { type: 'rewind'; targetTurn: number; newSessionId: string; prompt: string };
+  | { type: 'rewind'; targetTurn: number; newSessionId: string; prompt?: string };
 
 export type ProgressEvent =
   | { kind: 'started' }
