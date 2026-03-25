@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdtemp, rm, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, rm, readFile } from 'node:fs/promises';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -206,6 +206,32 @@ describe('ThreadMappingStore', () => {
     });
 
     expect(store.get('thread-1')?.sessionId).toBe('session-1');
+    expect(store.get('thread-2')?.sessionId).toBe('session-2');
+  });
+
+  it('前回の save が失敗しても次回の save が正常に動作する', async () => {
+    const dir = join(tempDir, 'subdir');
+    const filePath = join(dir, 'thread-sessions.json');
+    const store = new ThreadMappingStore(filePath);
+
+    // subdir が存在しないので save は失敗する
+    await expect(
+      store.set('thread-1', {
+        sessionId: 'session-1',
+        workDir: '/path1',
+        workspaceName: 'ws1',
+      }),
+    ).rejects.toThrow();
+
+    // ディレクトリを作成して再度 save → rejection handler 経由で doSave が実行される
+    await mkdir(dir, { recursive: true });
+
+    await store.set('thread-2', {
+      sessionId: 'session-2',
+      workDir: '/path2',
+      workspaceName: 'ws2',
+    });
+
     expect(store.get('thread-2')?.sessionId).toBe('session-2');
   });
 });

@@ -195,4 +195,34 @@ describe('SessionRestorer', () => {
       expect.stringContaining('ワークディレクトリが見つかりません'),
     );
   });
+
+  it('workDir 復元失敗時に thread.send() が拒否されても正常に null を返す', async () => {
+    vi.mocked(deps.threadMappingStore.get).mockReturnValue({
+      sessionId: 'session-abc',
+      workDir: '/nonexistent',
+      workspaceName: 'my-project',
+    });
+    mockStat.mockRejectedValue(new Error('ENOENT'));
+    vi.mocked(mockThread.send).mockRejectedValue(new Error('Discord error'));
+
+    const result = await restorer.tryRestore('thread-1', mockThread);
+    expect(result).toBeNull();
+  });
+
+  it('セッション復元失敗時に remove/send 両方が拒否されても正常に null を返す', async () => {
+    vi.mocked(deps.threadMappingStore.get).mockReturnValue({
+      sessionId: 'session-abc',
+      workDir: '/home/user/project',
+      workspaceName: 'my-project',
+    });
+    mockStat.mockResolvedValue({ isDirectory: () => true } as never);
+    vi.mocked(deps.createSession).mockImplementation(() => {
+      throw new Error('createSession failed');
+    });
+    vi.mocked(deps.threadMappingStore.remove).mockRejectedValue(new Error('disk full'));
+    vi.mocked(mockThread.send).mockRejectedValue(new Error('Discord error'));
+
+    const result = await restorer.tryRestore('thread-1', mockThread);
+    expect(result).toBeNull();
+  });
 });
