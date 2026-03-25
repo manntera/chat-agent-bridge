@@ -183,28 +183,57 @@ async function main(): Promise<void> {
 
     // セッションが見つからない場合、ディスクから遅延復元を試みる
     if (!ctx) {
-      const mapping = threadMappingStore.get(msg.channelId);
-      if (mapping) {
-        try {
-          await stat(mapping.workDir);
-          const restoredCtx = createSession(msg.channelId, msg.channel as ThreadSender, {
-            name: mapping.workspaceName,
-            path: mapping.workDir,
-          });
-          restoredCtx.session.restore(mapping.sessionId);
-          restoredCtx.setAuthorId(msg.author.id);
-          log(
-            `セッション復元: ${mapping.workspaceName} [${mapping.sessionId.slice(0, 8)}...] (thread: ${msg.channelId})`,
-          );
-          ctx = restoredCtx;
-        } catch {
-          msg.channel
-            .send(
-              'セッションの復元に失敗しました。`/cc resume` で再開するか、`/cc new` で新しいセッションを開始してください。',
-            )
-            .catch((err) => console.error('Discord send error:', err));
-          threadMappingStore.remove(msg.channelId);
-          return;
+      // 別のメッセージが既に復元中なら、その完了を待つ
+      const pending = pendingRestorations.get(msg.channelId);
+      if (pending) {
+        ctx = await pending;
+      } else {
+        const mapping = threadMappingStore.get(msg.channelId);
+        if (mapping) {
+          const restorationPromise = (async (): Promise<SessionContext | null> => {
+            // workDir の存在チェック
+            try {
+              await stat(mapping.workDir);
+            } catch {
+              msg.channel
+                .send(
+                  'セッションの復元に失敗しました。ワークディレクトリが見つかりません。`/cc resume` で再開するか、`/cc new` で新しいセッションを開始してください。',
+                )
+                .catch((err) => console.error('Discord send error:', err));
+              threadMappingStore.remove(msg.channelId);
+              return null;
+            }
+
+            // セッション作成・復元
+            const restoredCtx = createSession(msg.channelId, msg.channel as ThreadSender, {
+              name: mapping.workspaceName,
+              path: mapping.workDir,
+            });
+            try {
+              restoredCtx.session.restore(mapping.sessionId);
+            } catch (err) {
+              console.error('Session restore error:', err);
+              sessionManager.remove(msg.channelId);
+              msg.channel
+                .send(
+                  'セッションの復元に失敗しました。`/cc resume` で再開するか、`/cc new` で新しいセッションを開始してください。',
+                )
+                .catch((e) => console.error('Discord send error:', e));
+              return null;
+            }
+
+            log(
+              `セッション復元: ${mapping.workspaceName} [${mapping.sessionId.slice(0, 8)}...] (thread: ${msg.channelId})`,
+            );
+            return restoredCtx;
+          })();
+
+          pendingRestorations.set(msg.channelId, restorationPromise);
+          try {
+            ctx = await restorationPromise;
+          } finally {
+            pendingRestorations.delete(msg.channelId);
+          }
         }
       }
     }
@@ -227,6 +256,9 @@ async function main(): Promise<void> {
       log(`状態遷移: ${prevState} → ${newState} (thread: ${msg.channelId})`);
     }
   });
+
+  // セッション復元中の排他制御（同一スレッドへの並行復元を防止）
+  const pendingRestorations = new Map<string, Promise<SessionContext | null>>();
 
   // /cc new のワークスペース選択待ち中の options を一時保持
   const pendingNewOptions = new Map<string, import('./domain/types.js').SessionOptions>();

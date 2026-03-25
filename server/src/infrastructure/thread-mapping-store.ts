@@ -41,6 +41,7 @@ export class ThreadMappingStore {
     }
   }
 
+  /** ファイルに書き込み（同期I/O: マッピング数が大幅に増えた場合は非同期化を検討） */
   private save(): void {
     const data: ThreadMappingsFile = {
       mappings: Object.fromEntries(this.mappings),
