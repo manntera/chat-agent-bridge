@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { homedir } from 'node:os';
+import { join } from 'node:path';
 import { loadConfig } from './config.js';
 
 describe('loadConfig', () => {
@@ -17,6 +18,10 @@ describe('loadConfig', () => {
     process.env.DISCORD_TOKEN = 'test-token';
     process.env.CHANNEL_ID = '123456789';
     process.env.ALLOWED_USER_IDS = '111,222,333';
+    // オプショナル環境変数をクリア（テスト環境の漏れ防止）
+    delete process.env.GEMINI_API_KEY;
+    delete process.env.WORKSPACE_BASE_DIR;
+    delete process.env.THREAD_SESSIONS_FILE;
   }
 
   // ----- 正常系 -----
@@ -35,6 +40,7 @@ describe('loadConfig', () => {
         geminiApiKey: null,
         workspacesFile: 'workspaces.json',
         workspaceBaseDir: homedir(),
+        threadSessionsFile: join(process.cwd(), 'thread-sessions.json'),
       });
     });
 
