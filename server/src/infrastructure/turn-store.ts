@@ -1,4 +1,4 @@
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile, readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { projectDir } from './session-store.js';
 
@@ -58,6 +58,34 @@ export class TurnStore {
       }
     }
     await writeFile(turnsFilePath(targetSessionId, workDir), JSON.stringify(targetMap, null, 2));
+  }
+
+  /**
+   * 全セッションの turns.json を横断して Discord メッセージ ID から逆引きする。
+   * 現セッションの findTurn で見つからなかった場合のフォールバック用。
+   */
+  async findTurnAcrossSessions(
+    workDir: string,
+    discordMessageId: string,
+  ): Promise<{ sessionId: string; turn: number } | null> {
+    const dir = projectDir(workDir);
+    let entries: string[];
+    try {
+      entries = await readdir(dir);
+    } catch {
+      return null;
+    }
+    const turnsFiles = entries.filter((e) => e.endsWith('.turns.json'));
+    for (const file of turnsFiles) {
+      const map = await this.load(join(dir, file));
+      for (const [turnStr, msgId] of Object.entries(map)) {
+        if (msgId === discordMessageId) {
+          const sessionId = file.replace('.turns.json', '');
+          return { sessionId, turn: Number(turnStr) };
+        }
+      }
+    }
+    return null;
   }
 
   /** セッションの最大ターン番号を返す（データがなければ 0） */

@@ -223,11 +223,18 @@ async function main(): Promise<void> {
     // リプライ検出（巻き戻し）
     if (msg.reference?.messageId && ctx?.session.sessionId) {
       const referencedId = msg.reference.messageId;
-      const turn = await turnStore.findTurn(
-        ctx.session.sessionId,
-        ctx.session.workDir,
-        referencedId,
-      );
+
+      // 現セッション → 全セッション横断の順で検索
+      let sourceSessionId = ctx.session.sessionId;
+      let turn = await turnStore.findTurn(sourceSessionId, ctx.session.workDir, referencedId);
+
+      if (turn === null) {
+        const found = await turnStore.findTurnAcrossSessions(ctx.session.workDir, referencedId);
+        if (found) {
+          sourceSessionId = found.sessionId;
+          turn = found.turn;
+        }
+      }
 
       if (turn !== null) {
         // busy/interrupting 時は branch せず通知のみ（Orchestrator 側で処理）
@@ -243,12 +250,12 @@ async function main(): Promise<void> {
 
         try {
           const newSessionId = await sessionBrancher.branch(
-            ctx.session.sessionId,
+            sourceSessionId,
             ctx.session.workDir,
             turn,
           );
           log(
-            `巻き戻し: Turn ${turn} → 新セッション ${newSessionId.slice(0, 8)} (thread: ${msg.channelId})`,
+            `巻き戻し: Turn ${turn} (元セッション: ${sourceSessionId.slice(0, 8)}) → 新セッション ${newSessionId.slice(0, 8)} (thread: ${msg.channelId})`,
           );
 
           ctx.orchestrator.handleCommand({
