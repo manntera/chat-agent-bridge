@@ -187,9 +187,10 @@ async function main(): Promise<void> {
         const mapping = threadMappingStore.get(msg.channelId);
         if (mapping) {
           const restorationPromise = (async (): Promise<SessionContext | null> => {
-            // workDir の存在チェック
+            // workDir の存在チェック（ディレクトリであることも確認）
             try {
-              await stat(mapping.workDir);
+              const s = await stat(mapping.workDir);
+              if (!s.isDirectory()) throw new Error('Not a directory');
             } catch {
               msg.channel
                 .send(
