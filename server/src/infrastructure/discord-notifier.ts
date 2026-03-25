@@ -108,9 +108,7 @@ export function createNotifier(thread: ThreadSender): Notifier {
       const firstChunkMax = mentionPrefix ? 2000 - mentionPrefix.length : 2000;
       const firstChunk = result.text.slice(0, firstChunkMax);
       const rest = result.text.slice(firstChunkMax);
-      const chunks = rest.length > 0
-        ? [firstChunk, ...splitMessage(rest, 2000)]
-        : [firstChunk];
+      const chunks = rest.length > 0 ? [firstChunk, ...splitMessage(rest, 2000)] : [firstChunk];
       for (let i = 0; i < chunks.length; i++) {
         if (i === 0 && mentionPrefix) {
           sendText(`${mentionPrefix}${chunks[i]}`);
