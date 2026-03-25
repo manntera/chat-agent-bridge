@@ -256,10 +256,10 @@ async function main(): Promise<void> {
             prompt,
           });
 
-          persistMapping(msg.channelId, newSessionId, {
+          await persistMapping(msg.channelId, newSessionId, {
             path: ctx.session.workDir,
             name: ctx.session.workspaceName,
-          }).catch((err) => console.error('Persist mapping error:', err));
+          });
         } catch (err) {
           console.error('Rewind error:', err);
           msg.channel.send('巻き戻しに失敗しました').catch(() => {});
