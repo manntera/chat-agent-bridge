@@ -129,4 +129,19 @@ describe('createInterruptCommand', () => {
       ephemeral: true,
     });
   });
+
+  it('initial 状態なら「処理中ではありません」を返し、コマンドは発行しない (OrchestratorState 初期値の網羅)', async () => {
+    const ctx = makeCtx('initial');
+    sessionManager.get.mockReturnValue(coerceCtx(ctx));
+    const handler = makeHandler();
+    const interaction = makeInteraction();
+
+    await handler(coerceInteraction(interaction));
+
+    expect(ctx.orchestrator.handleCommand).not.toHaveBeenCalled();
+    expect(interaction.reply).toHaveBeenCalledWith({
+      content: '処理中ではありません',
+      ephemeral: true,
+    });
+  });
 });
