@@ -56,12 +56,15 @@ export interface NewCommand {
 export function createNewCommand(deps: NewCommandDeps): NewCommand {
   const { workspaceStore, createSession, persistMapping, channel } = deps;
 
-  function buildThreadName(workspace: Workspace, sessionId: string, opts: SessionOptions): string {
+  function buildOptionsSuffix(opts: SessionOptions): string {
     const details: string[] = [];
     if (opts.model) details.push(opts.model);
     if (opts.effort) details.push(opts.effort);
-    const suffix = details.length > 0 ? ` (${details.join(', ')})` : '';
-    return `[${workspace.name}] Session: ${sessionId.slice(0, 8)}${suffix}`;
+    return details.length > 0 ? ` (${details.join(', ')})` : '';
+  }
+
+  function buildThreadName(workspace: Workspace, sessionId: string, opts: SessionOptions): string {
+    return `[${workspace.name}] Session: ${sessionId.slice(0, 8)}${buildOptionsSuffix(opts)}`;
   }
 
   function buildStartMessage(
@@ -69,11 +72,7 @@ export function createNewCommand(deps: NewCommandDeps): NewCommand {
     sessionId: string,
     opts: SessionOptions,
   ): string {
-    const details: string[] = [];
-    if (opts.model) details.push(opts.model);
-    if (opts.effort) details.push(opts.effort);
-    const suffix = details.length > 0 ? ` (${details.join(', ')})` : '';
-    return `セッションを開始しました [\`${sessionId.slice(0, 8)}\`] — 📁 ${workspace.name}${suffix}`;
+    return `セッションを開始しました [\`${sessionId.slice(0, 8)}\`] — 📁 ${workspace.name}${buildOptionsSuffix(opts)}`;
   }
 
   /**
@@ -187,9 +186,6 @@ export function createNewCommand(deps: NewCommandDeps): NewCommand {
         return;
       }
 
-      // customId から options を復元
-      // options は cc_workspace_select_<model>_<effort> の形式でエンコード済み
-      // → 別のアプローチ: pendingOptions マップを使用
       const pending = pendingNewOptions.get(interaction.user.id);
       pendingNewOptions.delete(interaction.user.id);
 
@@ -212,4 +208,12 @@ export function createNewCommand(deps: NewCommandDeps): NewCommand {
       }
     },
   };
+}
+
+/**
+ * テスト専用ユーティリティ: module-level の pendingNewOptions Map をクリアする。
+ * プロダクションコードから呼ばない (名前の `__` と `ForTesting` で意図を示す)。
+ */
+export function __resetPendingOptionsForTesting(): void {
+  pendingNewOptions.clear();
 }

@@ -8,7 +8,7 @@ import type { SessionContext } from '../../domain/session-manager.js';
 import type { Workspace } from '../../domain/types.js';
 import type { IWorkspaceStore } from '../../infrastructure/workspace-store.js';
 import type { CreateSessionFn, PersistMappingFn } from '../session-factory.js';
-import { createNewCommand } from './new.js';
+import { createNewCommand, __resetPendingOptionsForTesting } from './new.js';
 
 /**
  * ユニットテスト方針:
@@ -205,6 +205,7 @@ describe('createNewCommand', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    __resetPendingOptionsForTesting();
     persistMapping = vi.fn<PersistMappingFn>().mockResolvedValue(undefined);
   });
 
