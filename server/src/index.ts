@@ -16,8 +16,6 @@ import { Session } from './domain/session.js';
 import { SessionManager } from './domain/session-manager.js';
 import type { Workspace } from './domain/types.js';
 import { loadConfig } from './infrastructure/config.js';
-import type { ThreadSender } from './infrastructure/discord-notifier.js';
-import { resolvePrompt } from './infrastructure/attachment-resolver.js';
 import { SessionStore } from './infrastructure/session-store.js';
 import { ccCommand } from './infrastructure/slash-commands.js';
 import { TitleGenerator } from './infrastructure/title-generator.js';
@@ -33,6 +31,7 @@ import { SessionBrancher } from './infrastructure/session-brancher.js';
 import { WorkspaceStore, listDirectories } from './infrastructure/workspace-store.js';
 import { createSessionFactory, createPersistMapping } from './discord/session-factory.js';
 import { createRewindHandler } from './discord/rewind-handler.js';
+import { createMessageController } from './discord/message-controller.js';
 import {
   formatRelativeDate,
   todayJST,
@@ -107,75 +106,14 @@ async function main(): Promise<void> {
   // App 層
   const handleMessage = createMessageHandler(accessControl, sessionManager);
 
-  // メッセージイベント（スレッド内のプロンプト）
-  client.on(Events.MessageCreate, async (msg) => {
-    if (msg.author.bot) return;
-
-    if (
-      msg.channel.type !== ChannelType.PublicThread &&
-      msg.channel.type !== ChannelType.PrivateThread
-    ) {
-      return; // チャンネル直接のメッセージは無視
-    }
-
-    const parentChannelId = msg.channel.parentId;
-    if (!parentChannelId) return;
-
-    // 添付テキストファイルの解決
-    const attachments = [...msg.attachments.values()].map((a) => ({
-      contentType: a.contentType,
-      name: a.name,
-      size: a.size,
-      url: a.url,
-    }));
-    const { prompt, error } = await resolvePrompt(msg.content, attachments);
-
-    if (prompt === null) return;
-
-    log(
-      `メッセージ受信: ${msg.author.username} "${prompt.slice(0, 100)}${prompt.length > 100 ? '...' : ''}" (thread: ${msg.channelId})`,
-    );
-
-    let ctx = sessionManager.get(msg.channelId);
-
-    // セッションが見つからない場合、ディスクから遅延復元を試みる
-    if (!ctx) {
-      ctx = await sessionRestorer.tryRestore(msg.channelId, msg.channel as ThreadSender);
-    }
-
-    if (error && ctx) {
-      msg.channel.send(error).catch((err) => console.error('Discord send error:', err));
-    }
-
-    if (ctx) {
-      ctx.setAuthorId(msg.author.id);
-    }
-
-    const rewindResult = await rewindHandler(msg, ctx, prompt);
-    if (rewindResult.handled) return;
-
-    const prevState = ctx?.orchestrator.state;
-
-    handleMessage({
-      authorBot: false,
-      authorId: msg.author.id,
-      channelId: parentChannelId,
-      threadId: msg.channelId,
-      content: prompt,
-    });
-
-    // ユーザーのメッセージ ID を記録（巻き戻し用）
-    if (ctx && prevState === 'idle' && ctx.orchestrator.state === 'busy') {
-      turnStore
-        .record(ctx.session.sessionId!, ctx.session.workDir, ctx.orchestrator.currentTurn, msg.id)
-        .catch((err) => console.error('Turn record error:', err));
-    }
-
-    const newState = ctx?.orchestrator.state;
-    if (prevState !== newState) {
-      log(`状態遷移: ${prevState} → ${newState} (thread: ${msg.channelId})`);
-    }
+  const messageController = createMessageController({
+    sessionManager,
+    sessionRestorer,
+    rewindHandler,
+    turnStore,
+    handleMessage,
   });
+  client.on(Events.MessageCreate, messageController);
 
   // /cc new のワークスペース選択待ち中の options を一時保持
   const pendingNewOptions = new Map<string, import('./domain/types.js').SessionOptions>();
