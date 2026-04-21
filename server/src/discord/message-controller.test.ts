@@ -323,9 +323,7 @@ describe('createMessageController', () => {
     const controller = makeController();
     await controller(makeMessage({ content: longContent }));
 
-    expect(handleMessage).toHaveBeenCalledWith(
-      expect.objectContaining({ content: longContent }),
-    );
+    expect(handleMessage).toHaveBeenCalledWith(expect.objectContaining({ content: longContent }));
   });
 
   it('turnStore.record が reject しても例外を伝播させない', async () => {
