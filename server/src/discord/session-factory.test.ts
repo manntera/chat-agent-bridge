@@ -133,7 +133,7 @@ describe('createSessionFactory', () => {
     expect(() => createSession('thread-1', thread, WORKSPACE)).not.toThrow();
   });
 
-  it('setAuthorId を経由したメンション設定が後続の送信に反映される', async () => {
+  it('setAuthorId で設定したユーザーへのメンションが result 送信に付与される', async () => {
     const createSession = createSessionFactory({
       config: { claudePath: '/usr/bin/claude' },
       sessionManager,
@@ -145,22 +145,20 @@ describe('createSessionFactory', () => {
     ctx.setAuthorId('user-123');
     ctx.session.ensure();
 
-    // エラー通知を notifier 経由で送ると、mention 付きで送信される。
-    // まず result をバッファし、その後 usage でフラッシュさせる。
+    // 正常系: onProcessEnd(0, output) → orchestrator が result 通知を発火 → notifier が pendingResult にバッファ
+    // → orchestrator が usageFetcher.fetch() を経て usage 通知を発火 → notifier.flush() で mention 付きで送信
     const mockProc = ctx.claudeProcess as unknown as MockClaudeProcessLike;
-    mockProc.onProcessEnd(1, 'エラー詳細');
+    mockProc.onProcessEnd(0, '回答本文');
 
     await flushAsync();
 
     const sendMock = vi.mocked(thread.send);
-    expect(sendMock).toHaveBeenCalled();
-    // 最後の送信が mention 付きで行われることを検証
-    const lastCall = sendMock.mock.calls[sendMock.mock.calls.length - 1][0];
-    if (typeof lastCall === 'string') {
-      expect(lastCall).toContain('<@user-123>');
-    } else {
-      expect(lastCall.content).toContain('<@user-123>');
-    }
+    // result はプレーンテキスト送信、mention は先頭に付与される (discord-notifier.ts:140-148)
+    const resultCall = sendMock.mock.calls.find(
+      ([arg]) => typeof arg === 'string' && arg.includes('<@user-123>'),
+    );
+    expect(resultCall).toBeDefined();
+    expect(resultCall?.[0]).toContain('回答本文');
   });
 
   describe('プロセス終了時のタイトル生成', () => {

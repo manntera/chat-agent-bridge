@@ -6,7 +6,7 @@ import { ClaudeProcess } from '../infrastructure/claude-process.js';
 import type { Config } from '../infrastructure/config.js';
 import { createNotifier, type ThreadSender } from '../infrastructure/discord-notifier.js';
 import type { ITitleGenerator } from '../infrastructure/title-generator.js';
-import { ThreadMappingStore } from '../infrastructure/thread-mapping-store.js';
+import type { ThreadMappingStore } from '../infrastructure/thread-mapping-store.js';
 import { log, logNotification } from '../helpers.js';
 
 export interface SessionFactoryDeps {
