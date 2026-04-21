@@ -32,13 +32,8 @@ import { WorkspaceStore, listDirectories } from './infrastructure/workspace-stor
 import { createSessionFactory, createPersistMapping } from './discord/session-factory.js';
 import { createRewindHandler } from './discord/rewind-handler.js';
 import { createMessageController } from './discord/message-controller.js';
-import {
-  formatRelativeDate,
-  todayJST,
-  parseDateInput,
-  generateDateChoices,
-  log,
-} from './helpers.js';
+import { createResumeCommand } from './discord/commands/resume.js';
+import { todayJST, parseDateInput, generateDateChoices, log } from './helpers.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -115,6 +110,15 @@ async function main(): Promise<void> {
   });
   client.on(Events.MessageCreate, messageController);
 
+  const resumeCommand = createResumeCommand({
+    workspaceStore,
+    sessionStore,
+    turnStore,
+    createSession,
+    persistMapping,
+    channel,
+  });
+
   // /cc new のワークスペース選択待ち中の options を一時保持
   const pendingNewOptions = new Map<string, import('./domain/types.js').SessionOptions>();
 
@@ -177,56 +181,8 @@ async function main(): Promise<void> {
     }
 
     // StringSelectMenu の選択イベント（/cc resume のセッション選択）
-    if (interaction.isStringSelectMenu() && interaction.customId === 'cc_resume_select') {
-      // value 形式: "workspaceName:sessionId"
-      const rawValue = interaction.values[0];
-      const sepIdx = rawValue.indexOf(':');
-      const wsName = rawValue.slice(0, sepIdx);
-      const selectedSessionId = rawValue.slice(sepIdx + 1);
-      const workspace = workspaceStore.findByName(wsName);
-
-      log(
-        `セッション選択: ${interaction.user.username} [${wsName}] ${selectedSessionId.slice(0, 8)}...`,
-      );
-
-      if (!workspace) {
-        await interaction.update({
-          content: `ワークスペース「${wsName}」が見つかりません`,
-          components: [],
-        });
-        return;
-      }
-
-      try {
-        const thread = await channel.threads.create({
-          name: `[${workspace.name}] Session: ${selectedSessionId.slice(0, 8)}... (再開)`,
-          autoArchiveDuration: 60,
-        });
-
-        const ctx = createSession(thread.id, thread, workspace);
-        ctx.session.restore(selectedSessionId);
-
-        // ターンカウンタを復元
-        const maxTurn = await turnStore.maxTurn(selectedSessionId, workspace.path);
-        ctx.orchestrator.restoreTurnCount(maxTurn);
-
-        await persistMapping(thread.id, selectedSessionId, workspace);
-
-        await thread.send(
-          `セッションを再開しました [\`${selectedSessionId.slice(0, 8)}\`] — 📁 ${workspace.name}`,
-        );
-
-        await interaction.update({
-          content: `セッション \`${selectedSessionId.slice(0, 8)}...\` を再開しました → <#${thread.id}>`,
-          components: [],
-        });
-      } catch (err) {
-        console.error('Resume session error:', err);
-        await interaction.update({
-          content: 'セッションの再開に失敗しました',
-          components: [],
-        });
-      }
+    if (interaction.isStringSelectMenu() && interaction.customId === resumeCommand.customId) {
+      await resumeCommand.handleSelect(interaction);
       return;
     }
 
@@ -684,81 +640,7 @@ async function main(): Promise<void> {
 
     // /cc resume — 全ワークスペース横断でセッション一覧を表示
     if (subcommand === 'resume') {
-      await interaction.deferReply({ ephemeral: true });
-
-      try {
-        const workspaces = workspaceStore.list();
-
-        if (workspaces.length === 0) {
-          await interaction.editReply(
-            '⚠️ ワークスペースが登録されていません。`/cc workspace add` で登録してください。',
-          );
-          return;
-        }
-
-        // 全ワークスペースからセッションを収集
-        type SessionWithWorkspace = {
-          workspace: Workspace;
-          sessionId: string;
-          firstUserMessage: string;
-          slug: string | null;
-          lastModified: Date;
-        };
-        const allSessions: SessionWithWorkspace[] = [];
-        for (const ws of workspaces) {
-          const sessions = await sessionStore.listSessions(ws.path);
-          for (const s of sessions) {
-            allSessions.push({ workspace: ws, ...s });
-          }
-        }
-
-        // lastModified 降順でソートし、上位25件
-        allSessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
-        const top = allSessions.slice(0, 25);
-
-        if (top.length === 0) {
-          await interaction.editReply('再開できるセッションがありません');
-          return;
-        }
-
-        const selectMenu = new StringSelectMenuBuilder()
-          .setCustomId('cc_resume_select')
-          .setPlaceholder('セッションを選択してください')
-          .addOptions(
-            top.map((s) => {
-              const prefix = `[${s.workspace.name}] `;
-              const cleanMsg = s.firstUserMessage.replace(/\s+/g, ' ').trim();
-              const maxLabelLen = 100 - prefix.length;
-              const baseLabel = s.slug
-                ? s.slug.length > maxLabelLen
-                  ? s.slug.slice(0, maxLabelLen - 3) + '...'
-                  : s.slug
-                : cleanMsg.length > maxLabelLen
-                  ? cleanMsg.slice(0, maxLabelLen - 3) + '...'
-                  : cleanMsg || '(空のメッセージ)';
-              const label = prefix + baseLabel;
-              const desc = s.slug
-                ? cleanMsg.length > 100
-                  ? cleanMsg.slice(0, 97) + '...'
-                  : cleanMsg
-                : formatRelativeDate(s.lastModified);
-              return {
-                label,
-                description: desc || formatRelativeDate(s.lastModified),
-                value: `${s.workspace.name}:${s.sessionId}`,
-              };
-            }),
-          );
-
-        const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
-        await interaction.editReply({
-          content: '再開するセッションを選択してください:',
-          components: [row],
-        });
-      } catch (err) {
-        console.error('Resume session list error:', err);
-        await interaction.editReply('セッション一覧の取得に失敗しました');
-      }
+      await resumeCommand.handleCommand(interaction);
       return;
     }
   });
