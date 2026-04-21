@@ -20,9 +20,6 @@ import { SessionStore } from './infrastructure/session-store.js';
 import { ccCommand } from './infrastructure/slash-commands.js';
 import { TitleGenerator } from './infrastructure/title-generator.js';
 import { ReportGenerator } from './infrastructure/report-generator.js';
-import type { DailySession } from './infrastructure/report-generator.js';
-import { readSession } from './infrastructure/session-reader.js';
-import { getDayBoundary } from './infrastructure/session-store.js';
 import { UsageFetcher } from './infrastructure/usage-fetcher.js';
 import { SessionRestorer } from './infrastructure/session-restorer.js';
 import { ThreadMappingStore } from './infrastructure/thread-mapping-store.js';
@@ -32,13 +29,8 @@ import { WorkspaceStore, listDirectories } from './infrastructure/workspace-stor
 import { createSessionFactory, createPersistMapping } from './discord/session-factory.js';
 import { createRewindHandler } from './discord/rewind-handler.js';
 import { createMessageController } from './discord/message-controller.js';
-import {
-  formatRelativeDate,
-  todayJST,
-  parseDateInput,
-  generateDateChoices,
-  log,
-} from './helpers.js';
+import { createReportCommand } from './discord/commands/report.js';
+import { formatRelativeDate, log } from './helpers.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -115,6 +107,13 @@ async function main(): Promise<void> {
   });
   client.on(Events.MessageCreate, messageController);
 
+  const reportCommand = createReportCommand({
+    reportGenerator,
+    workspaceStore,
+    sessionStore,
+    channel,
+  });
+
   // /cc new のワークスペース選択待ち中の options を一時保持
   const pendingNewOptions = new Map<string, import('./domain/types.js').SessionOptions>();
 
@@ -164,15 +163,7 @@ async function main(): Promise<void> {
   client.on(Events.InteractionCreate, async (interaction) => {
     // オートコンプリートイベント（/cc report の date）
     if (interaction.isAutocomplete() && interaction.commandName === 'cc') {
-      const focused = interaction.options.getFocused(true);
-      if (focused.name === 'date') {
-        const choices = generateDateChoices();
-        const input = focused.value.toLowerCase();
-        const filtered = input
-          ? choices.filter((c) => c.name.includes(input) || c.value.includes(input))
-          : choices;
-        await interaction.respond(filtered.slice(0, 25));
-      }
+      await reportCommand.handleAutocomplete(interaction);
       return;
     }
 
@@ -576,109 +567,7 @@ async function main(): Promise<void> {
 
     // /cc report — 日報を生成（全ワークスペース横断）
     if (subcommand === 'report') {
-      if (!reportGenerator) {
-        await interaction.reply({
-          content: '⚠️ 日報生成には GEMINI_API_KEY の設定が必要です',
-          ephemeral: true,
-        });
-        return;
-      }
-
-      await interaction.deferReply();
-
-      try {
-        const dateStr = interaction.options.getString('date');
-        let targetDate: Date;
-
-        if (dateStr) {
-          const parsed = parseDateInput(dateStr);
-          if (!parsed) {
-            await interaction.editReply(
-              '⚠️ 日付の形式が不正です（YYYY-MM-DD または -1, -2 等の相対指定で入力してください）',
-            );
-            return;
-          }
-          targetDate = parsed;
-        } else {
-          targetDate = todayJST();
-        }
-
-        const { from, to } = getDayBoundary(targetDate);
-
-        // 全ワークスペースからセッションを収集
-        const workspaces = workspaceStore.list();
-        const allSessions: Array<{
-          workspace: Workspace;
-          sessions: Awaited<ReturnType<typeof sessionStore.listSessionsByDateRange>>;
-        }> = [];
-        for (const ws of workspaces) {
-          const sessions = await sessionStore.listSessionsByDateRange(ws.path, from, to);
-          if (sessions.length > 0) {
-            allSessions.push({ workspace: ws, sessions });
-          }
-        }
-
-        const totalCount = allSessions.reduce((sum, e) => sum + e.sessions.length, 0);
-        if (totalCount === 0) {
-          const dateLabel =
-            dateStr ?? targetDate.toLocaleDateString('ja-JP', { timeZone: 'Asia/Tokyo' });
-          await interaction.editReply(`⚠️ ${dateLabel} のセッションが見つかりません`);
-          return;
-        }
-
-        log(`日報生成開始: ${totalCount} セッション (${allSessions.length} ワークスペース)`);
-
-        // 各セッションの会話を読み込み
-        const dailySessions: DailySession[] = [];
-        for (const { workspace: ws, sessions } of allSessions) {
-          for (const s of sessions) {
-            try {
-              const entries = await readSession(s.sessionId, ws.path);
-              dailySessions.push({
-                sessionId: s.sessionId,
-                title: `[${ws.name}] ${s.slug ?? s.firstUserMessage.slice(0, 50)}`,
-                messageCount: entries.length,
-                entries,
-              });
-            } catch {
-              log(`セッション読み込みスキップ: ${s.sessionId}`);
-            }
-          }
-        }
-
-        if (dailySessions.length === 0) {
-          await interaction.editReply('⚠️ セッションの読み込みに失敗しました');
-          return;
-        }
-
-        const report = await reportGenerator.generate(dailySessions, targetDate);
-
-        if (!report) {
-          await interaction.editReply('⚠️ 日報の生成に失敗しました');
-          return;
-        }
-
-        // Discord の文字数上限（2000文字）で分割送信
-        if (report.length <= 2000) {
-          await interaction.editReply(report);
-        } else {
-          const chunks: string[] = [];
-          let remaining = report;
-          while (remaining.length > 0) {
-            chunks.push(remaining.slice(0, 2000));
-            remaining = remaining.slice(2000);
-          }
-          await interaction.editReply(chunks[0]);
-          for (let i = 1; i < chunks.length; i++) {
-            await channel.send(chunks[i]);
-          }
-        }
-
-        log('日報生成完了');
-      } catch (err) {
-        console.error('Report generation error:', err);
-        await interaction.editReply('⚠️ 日報の生成中にエラーが発生しました');
-      }
+      await reportCommand.handleCommand(interaction);
       return;
     }
 
