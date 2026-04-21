@@ -32,6 +32,7 @@ import { TurnStore } from './infrastructure/turn-store.js';
 import { SessionBrancher } from './infrastructure/session-brancher.js';
 import { WorkspaceStore, listDirectories } from './infrastructure/workspace-store.js';
 import { createSessionFactory, createPersistMapping } from './discord/session-factory.js';
+import { createRewindHandler } from './discord/rewind-handler.js';
 import {
   formatRelativeDate,
   todayJST,
@@ -101,6 +102,8 @@ async function main(): Promise<void> {
 
   const persistMapping = createPersistMapping(threadMappingStore);
 
+  const rewindHandler = createRewindHandler({ turnStore, sessionBrancher, persistMapping });
+
   // App 層
   const handleMessage = createMessageHandler(accessControl, sessionManager);
 
@@ -148,66 +151,8 @@ async function main(): Promise<void> {
       ctx.setAuthorId(msg.author.id);
     }
 
-    // リプライ検出（質問上書きによる巻き戻し）
-    if (msg.reference?.messageId && ctx?.session.sessionId) {
-      const referencedId = msg.reference.messageId;
-
-      // 現セッション → 全セッション横断の順で検索
-      let sourceSessionId = ctx.session.sessionId;
-      let turn = await turnStore.findTurn(sourceSessionId, ctx.session.workDir, referencedId);
-
-      if (turn === null) {
-        const found = await turnStore.findTurnAcrossSessions(ctx.session.workDir, referencedId);
-        if (found) {
-          sourceSessionId = found.sessionId;
-          turn = found.turn;
-        }
-      }
-
-      if (turn !== null) {
-        // リプライ先の質問の直前まで保持し、新しいプロンプトで上書き
-        const branchTurn = turn - 1;
-
-        // busy/interrupting 時は branch せず通知のみ（Orchestrator 側で処理）
-        if (ctx.orchestrator.state !== 'idle') {
-          ctx.orchestrator.handleCommand({
-            type: 'rewind',
-            targetTurn: branchTurn,
-            newSessionId: '', // busy 時は Orchestrator が拒否するため使われない
-            prompt,
-          });
-          return;
-        }
-
-        try {
-          const newSessionId = await sessionBrancher.branch(
-            sourceSessionId,
-            ctx.session.workDir,
-            branchTurn,
-          );
-          log(
-            `巻き戻し: Turn ${turn} を上書き (元セッション: ${sourceSessionId.slice(0, 8)}) → 新セッション ${newSessionId.slice(0, 8)} (thread: ${msg.channelId})`,
-          );
-
-          ctx.orchestrator.handleCommand({
-            type: 'rewind',
-            targetTurn: branchTurn,
-            newSessionId,
-            prompt,
-          });
-
-          await persistMapping(msg.channelId, newSessionId, {
-            path: ctx.session.workDir,
-            name: ctx.session.workspaceName,
-          });
-        } catch (err) {
-          console.error('Rewind error:', err);
-          msg.channel.send('巻き戻しに失敗しました').catch(() => {});
-        }
-        return;
-      }
-      // turn が見つからない場合 → 通常メッセージとして処理
-    }
+    const rewindResult = await rewindHandler(msg, ctx, prompt);
+    if (rewindResult.handled) return;
 
     const prevState = ctx?.orchestrator.state;
 
