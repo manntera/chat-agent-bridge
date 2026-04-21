@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { ChatInputCommandInteraction, StringSelectMenuInteraction } from 'discord.js';
-import type { WorkspaceStore } from '../../infrastructure/workspace-store.js';
+import { listDirectories, type WorkspaceStore } from '../../infrastructure/workspace-store.js';
 import { createWorkspaceCommands } from './workspace.js';
 
 // listDirectories をモック化してファイルシステムに依存しない
@@ -14,9 +14,7 @@ vi.mock('../../infrastructure/workspace-store.js', async () => {
   };
 });
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-const workspaceStoreModule: any = await import('../../infrastructure/workspace-store.js');
-const mockedListDirectories = workspaceStoreModule.listDirectories as ReturnType<typeof vi.fn>;
+const mockedListDirectories = vi.mocked(listDirectories);
 
 interface WorkspaceStoreMock {
   list: ReturnType<typeof vi.fn>;
