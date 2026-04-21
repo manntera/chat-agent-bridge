@@ -121,7 +121,7 @@ export function createReportCommand(deps: ReportCommandDeps): ReportCommandHandl
       const workspaces = workspaceStore.list();
       const allSessions: Array<{
         workspace: Workspace;
-        sessions: Awaited<ReturnType<typeof sessionStore.listSessionsByDateRange>>;
+        sessions: SessionSummary[];
       }> = [];
       for (const ws of workspaces) {
         const sessions = await sessionStore.listSessionsByDateRange(ws.path, from, to);
@@ -153,6 +153,7 @@ export function createReportCommand(deps: ReportCommandDeps): ReportCommandHandl
               entries,
             });
           } catch {
+            // 破損 JSONL などで個別セッションの読み込みが失敗しても、他セッションの日報生成は続ける
             log(`セッション読み込みスキップ: ${s.sessionId}`);
           }
         }

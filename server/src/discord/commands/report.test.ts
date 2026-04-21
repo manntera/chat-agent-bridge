@@ -390,6 +390,30 @@ describe('createReportCommand', () => {
       consoleErrSpy.mockRestore();
     });
 
+    it('一部セッションの readSession が throw しても、成功した分だけで generate を呼ぶ', async () => {
+      sessionStore.listSessionsByDateRange.mockResolvedValue([
+        makeSessionSummary('s1', new Date('2026-04-21T10:00:00+09:00')),
+        makeSessionSummary('s2', new Date('2026-04-21T11:00:00+09:00')),
+        makeSessionSummary('s3', new Date('2026-04-21T12:00:00+09:00')),
+      ]);
+      mockedReadSession
+        .mockResolvedValueOnce(makeEntries())
+        .mockRejectedValueOnce(new Error('broken jsonl for s2'))
+        .mockResolvedValueOnce(makeEntries());
+
+      const { handleCommand } = makeHandlers();
+      const cmd = makeCommand('2026-04-21');
+
+      await handleCommand(coerceCommand(cmd));
+
+      expect(reportGenerator.generate).toHaveBeenCalledTimes(1);
+      const [sessions] = reportGenerator.generate.mock.calls[0] as [DailySession[], Date];
+      expect(sessions).toHaveLength(2);
+      const titles = sessions.map((s) => s.title);
+      expect(titles.some((t) => t.includes('first-s1'))).toBe(true);
+      expect(titles.some((t) => t.includes('first-s3'))).toBe(true);
+    });
+
     it('generate 結果が 2000 文字超なら sendReport 経由で分割送信する', async () => {
       sessionStore.listSessionsByDateRange.mockResolvedValue([
         makeSessionSummary('s1', new Date('2026-04-21T10:00:00+09:00')),
