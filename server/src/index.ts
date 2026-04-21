@@ -1,20 +1,8 @@
 import 'dotenv/config';
-import { basename, dirname, join } from 'node:path';
-import {
-  ActionRowBuilder,
-  Client,
-  ChannelType,
-  Events,
-  GatewayIntentBits,
-  StringSelectMenuBuilder,
-  TextChannel,
-} from 'discord.js';
+import { Client, ChannelType, Events, GatewayIntentBits, TextChannel } from 'discord.js';
 import { createMessageHandler } from './app/message-handler.js';
-import { toCommand } from './app/interaction-handler.js';
 import { AccessControl } from './domain/access-control.js';
-import { Session } from './domain/session.js';
 import { SessionManager } from './domain/session-manager.js';
-import type { Workspace } from './domain/types.js';
 import { loadConfig } from './infrastructure/config.js';
 import { SessionStore } from './infrastructure/session-store.js';
 import { ccCommand } from './infrastructure/slash-commands.js';
@@ -25,12 +13,16 @@ import { SessionRestorer } from './infrastructure/session-restorer.js';
 import { ThreadMappingStore } from './infrastructure/thread-mapping-store.js';
 import { TurnStore } from './infrastructure/turn-store.js';
 import { SessionBrancher } from './infrastructure/session-brancher.js';
-import { WorkspaceStore, listDirectories } from './infrastructure/workspace-store.js';
+import { WorkspaceStore } from './infrastructure/workspace-store.js';
 import { createSessionFactory, createPersistMapping } from './discord/session-factory.js';
 import { createRewindHandler } from './discord/rewind-handler.js';
 import { createMessageController } from './discord/message-controller.js';
+import { createInterruptCommand } from './discord/commands/interrupt.js';
+import { createNewCommand } from './discord/commands/new.js';
 import { createReportCommand } from './discord/commands/report.js';
-import { formatRelativeDate, log } from './helpers.js';
+import { createResumeCommand } from './discord/commands/resume.js';
+import { createWorkspaceCommands } from './discord/commands/workspace.js';
+import { log } from './helpers.js';
 
 async function main(): Promise<void> {
   const config = loadConfig();
@@ -107,57 +99,32 @@ async function main(): Promise<void> {
   });
   client.on(Events.MessageCreate, messageController);
 
+  const interruptCommand = createInterruptCommand({ sessionManager });
+  const newCommand = createNewCommand({
+    workspaceStore,
+    createSession,
+    persistMapping,
+    channel,
+  });
   const reportCommand = createReportCommand({
     reportGenerator,
     workspaceStore,
     sessionStore,
     channel,
   });
+  const resumeCommand = createResumeCommand({
+    workspaceStore,
+    sessionStore,
+    turnStore,
+    createSession,
+    persistMapping,
+    channel,
+  });
 
-  // /cc new のワークスペース選択待ち中の options を一時保持
-  const pendingNewOptions = new Map<string, import('./domain/types.js').SessionOptions>();
-
-  // /cc workspace add のディレクトリブラウズ状態を一時保持
-  const browsingState = new Map<string, { currentPath: string; customName?: string }>();
-
-  /** ディレクトリブラウズ用のセレクトメニューを構築する */
-  function buildBrowseMenu(currentPath: string): ActionRowBuilder<StringSelectMenuBuilder> | null {
-    const dirs = listDirectories(currentPath);
-    const options: Array<{ label: string; description: string; value: string }> = [];
-
-    // 現在のディレクトリを登録する選択肢
-    options.push({
-      label: `${basename(currentPath)} をワークスペースに登録`,
-      description: currentPath,
-      value: '__confirm__',
-    });
-
-    // 上のディレクトリへ（ルートでない場合）
-    if (dirname(currentPath) !== currentPath) {
-      options.push({
-        label: '.. (上のディレクトリへ)',
-        description: dirname(currentPath),
-        value: '__up__',
-      });
-    }
-
-    // サブディレクトリ（最大23件 — confirm + up で2枠使用、合計25が上限）
-    for (const dir of dirs.slice(0, 23)) {
-      const fullPath = join(currentPath, dir);
-      options.push({
-        label: dir,
-        description: fullPath.length > 100 ? '...' + fullPath.slice(-97) : fullPath,
-        value: dir,
-      });
-    }
-
-    const selectMenu = new StringSelectMenuBuilder()
-      .setCustomId('cc_workspace_browse')
-      .setPlaceholder('ディレクトリを選択してください')
-      .addOptions(options);
-
-    return new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
-  }
+  const workspaceCommands = createWorkspaceCommands({
+    workspaceStore,
+    workspaceBaseDir: config.workspaceBaseDir,
+  });
 
   // スラッシュコマンドイベント
   client.on(Events.InteractionCreate, async (interaction) => {
@@ -168,168 +135,23 @@ async function main(): Promise<void> {
     }
 
     // StringSelectMenu の選択イベント（/cc resume のセッション選択）
-    if (interaction.isStringSelectMenu() && interaction.customId === 'cc_resume_select') {
-      // value 形式: "workspaceName:sessionId"
-      const rawValue = interaction.values[0];
-      const sepIdx = rawValue.indexOf(':');
-      const wsName = rawValue.slice(0, sepIdx);
-      const selectedSessionId = rawValue.slice(sepIdx + 1);
-      const workspace = workspaceStore.findByName(wsName);
-
-      log(
-        `セッション選択: ${interaction.user.username} [${wsName}] ${selectedSessionId.slice(0, 8)}...`,
-      );
-
-      if (!workspace) {
-        await interaction.update({
-          content: `ワークスペース「${wsName}」が見つかりません`,
-          components: [],
-        });
-        return;
-      }
-
-      try {
-        const thread = await channel.threads.create({
-          name: `[${workspace.name}] Session: ${selectedSessionId.slice(0, 8)}... (再開)`,
-          autoArchiveDuration: 60,
-        });
-
-        const ctx = createSession(thread.id, thread, workspace);
-        ctx.session.restore(selectedSessionId);
-
-        // ターンカウンタを復元
-        const maxTurn = await turnStore.maxTurn(selectedSessionId, workspace.path);
-        ctx.orchestrator.restoreTurnCount(maxTurn);
-
-        await persistMapping(thread.id, selectedSessionId, workspace);
-
-        await thread.send(
-          `セッションを再開しました [\`${selectedSessionId.slice(0, 8)}\`] — 📁 ${workspace.name}`,
-        );
-
-        await interaction.update({
-          content: `セッション \`${selectedSessionId.slice(0, 8)}...\` を再開しました → <#${thread.id}>`,
-          components: [],
-        });
-      } catch (err) {
-        console.error('Resume session error:', err);
-        await interaction.update({
-          content: 'セッションの再開に失敗しました',
-          components: [],
-        });
-      }
+    if (interaction.isStringSelectMenu() && interaction.customId === resumeCommand.customId) {
+      await resumeCommand.handleSelect(interaction);
       return;
     }
 
     // StringSelectMenu の選択イベント（/cc new のワークスペース選択）
-    if (interaction.isStringSelectMenu() && interaction.customId === 'cc_workspace_select') {
-      const wsName = interaction.values[0];
-      const workspace = workspaceStore.findByName(wsName);
-
-      if (!workspace) {
-        await interaction.update({
-          content: `ワークスペース「${wsName}」が見つかりません`,
-          components: [],
-        });
-        return;
-      }
-
-      // customId から options を復元
-      // options は cc_workspace_select_<model>_<effort> の形式でエンコード済み
-      // → 別のアプローチ: pendingOptions マップを使用
-      const pending = pendingNewOptions.get(interaction.user.id);
-      pendingNewOptions.delete(interaction.user.id);
-
-      try {
-        const opts = pending ?? {};
-        const session = new Session(workspace.path, workspace.name);
-        session.ensure(opts);
-        const sessionId = session.sessionId!;
-
-        const details: string[] = [];
-        if (opts.model) details.push(opts.model);
-        if (opts.effort) details.push(opts.effort);
-        const suffix = details.length > 0 ? ` (${details.join(', ')})` : '';
-        const threadName = `[${workspace.name}] Session: ${sessionId.slice(0, 8)}${suffix}`;
-
-        const thread = await channel.threads.create({ name: threadName, autoArchiveDuration: 60 });
-        const ctx = createSession(thread.id, thread, workspace);
-        ctx.session.reset();
-        ctx.session.ensure(opts);
-
-        await persistMapping(thread.id, ctx.session.sessionId!, workspace);
-
-        await thread.send(
-          `セッションを開始しました [\`${ctx.session.sessionId!.slice(0, 8)}\`] — 📁 ${workspace.name}${suffix}`,
-        );
-
-        await interaction.update({
-          content: `セッションを作成しました → <#${thread.id}>`,
-          components: [],
-        });
-
-        log(`スレッド作成: ${thread.name} (${thread.id})`);
-      } catch (err) {
-        console.error('Thread creation error:', err);
-        await interaction.update({
-          content: 'スレッドの作成に失敗しました',
-          components: [],
-        });
-      }
+    if (interaction.isStringSelectMenu() && interaction.customId === newCommand.customId) {
+      await newCommand.handleSelect(interaction);
       return;
     }
 
     // StringSelectMenu の選択イベント（/cc workspace add のディレクトリブラウズ）
-    if (interaction.isStringSelectMenu() && interaction.customId === 'cc_workspace_browse') {
-      const selected = interaction.values[0];
-      const state = browsingState.get(interaction.user.id);
-
-      if (!state) {
-        await interaction.update({
-          content:
-            'ブラウズセッションが期限切れです。再度 `/cc workspace add` を実行してください。',
-          components: [],
-        });
-        return;
-      }
-
-      if (selected === '__confirm__') {
-        // 現在のディレクトリをワークスペースとして登録
-        const wsName = state.customName || basename(state.currentPath);
-        browsingState.delete(interaction.user.id);
-        try {
-          workspaceStore.add({ name: wsName, path: state.currentPath });
-          await interaction.update({
-            content: `✅ ワークスペース「${wsName}」を登録しました (${state.currentPath})`,
-            components: [],
-          });
-        } catch (err) {
-          await interaction.update({
-            content: `⚠️ ${err instanceof Error ? err.message : '登録に失敗しました'}`,
-            components: [],
-          });
-        }
-        return;
-      }
-
-      if (selected === '__up__') {
-        state.currentPath = dirname(state.currentPath);
-      } else {
-        state.currentPath = join(state.currentPath, selected);
-      }
-
-      const row = buildBrowseMenu(state.currentPath);
-      if (row) {
-        await interaction.update({
-          content: `📂 ${state.currentPath}`,
-          components: [row],
-        });
-      } else {
-        await interaction.update({
-          content: `⚠️ ディレクトリの読み取りに失敗しました`,
-          components: [],
-        });
-      }
+    if (
+      interaction.isStringSelectMenu() &&
+      interaction.customId === workspaceCommands.browseCustomId
+    ) {
+      await workspaceCommands.handleBrowseSelect(interaction);
       return;
     }
 
@@ -364,204 +186,19 @@ async function main(): Promise<void> {
 
     // /cc workspace add|remove|list
     if (subcommandGroup === 'workspace') {
-      if (subcommand === 'add') {
-        const name = interaction.options.getString('name') ?? undefined;
-        const path = interaction.options.getString('path') ?? undefined;
-
-        // path が指定されている場合は直接登録
-        if (path) {
-          const wsName = name || basename(path);
-          try {
-            workspaceStore.add({ name: wsName, path });
-            await interaction.reply({
-              content: `✅ ワークスペース「${wsName}」を登録しました (${path})`,
-              ephemeral: true,
-            });
-          } catch (err) {
-            await interaction.reply({
-              content: `⚠️ ${err instanceof Error ? err.message : '登録に失敗しました'}`,
-              ephemeral: true,
-            });
-          }
-          return;
-        }
-
-        // path 省略 → ディレクトリブラウズモード
-        const startPath = config.workspaceBaseDir;
-        browsingState.set(interaction.user.id, { currentPath: startPath, customName: name });
-
-        const row = buildBrowseMenu(startPath);
-        if (row) {
-          await interaction.reply({
-            content: `📂 ${startPath}`,
-            components: [row],
-            ephemeral: true,
-          });
-        } else {
-          await interaction.reply({
-            content: '⚠️ ベースディレクトリの読み取りに失敗しました',
-            ephemeral: true,
-          });
-        }
-        return;
-      }
-
-      if (subcommand === 'remove') {
-        const name = interaction.options.getString('name', true);
-        const removed = workspaceStore.remove(name);
-        if (removed) {
-          await interaction.reply({
-            content: `✅ ワークスペース「${name}」を削除しました`,
-            ephemeral: true,
-          });
-        } else {
-          await interaction.reply({
-            content: `⚠️ ワークスペース「${name}」が見つかりません`,
-            ephemeral: true,
-          });
-        }
-        return;
-      }
-
-      if (subcommand === 'list') {
-        const workspaces = workspaceStore.list();
-        if (workspaces.length === 0) {
-          await interaction.reply({
-            content: 'ワークスペースが登録されていません。`/cc workspace add` で登録してください。',
-            ephemeral: true,
-          });
-        } else {
-          const lines = workspaces.map((w, i) => `${i + 1}. **${w.name}** — ${w.path}`);
-          await interaction.reply({
-            content: `📁 登録済みワークスペース:\n${lines.join('\n')}`,
-            ephemeral: true,
-          });
-        }
-        return;
-      }
+      await workspaceCommands.handleCommand(interaction);
       return;
     }
 
     // /cc new — スレッドを作成してセッションを登録
     if (subcommand === 'new') {
-      const command = toCommand({
-        authorBot: false,
-        authorId: interaction.user.id,
-        channelId: interaction.channelId,
-        subcommand: 'new',
-        model: interaction.options.getString('model') ?? undefined,
-        effort: interaction.options.getString('effort') ?? undefined,
-        threadId: null,
-      });
-      if (!command || command.type !== 'new') return;
-
-      const workspaces = workspaceStore.list();
-
-      // ワークスペースが 0 件
-      if (workspaces.length === 0) {
-        await interaction.reply({
-          content:
-            '⚠️ ワークスペースが登録されていません。`/cc workspace add` で登録してください。',
-          ephemeral: true,
-        });
-        return;
-      }
-
-      // ワークスペースが 2 件以上 → セレクトメニュー
-      if (workspaces.length >= 2) {
-        // options を一時保存
-        pendingNewOptions.set(interaction.user.id, command.options);
-
-        const selectMenu = new StringSelectMenuBuilder()
-          .setCustomId('cc_workspace_select')
-          .setPlaceholder('ワークスペースを選択してください')
-          .addOptions(
-            workspaces.map((w) => ({
-              label: w.name,
-              description: w.path,
-              value: w.name,
-            })),
-          );
-
-        const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
-        await interaction.reply({
-          content: '作業ディレクトリを選択してください:',
-          components: [row],
-          ephemeral: true,
-        });
-        return;
-      }
-
-      // ワークスペースが 1 件 → 自動選択
-      const workspace = workspaces[0];
-      try {
-        const session = new Session(workspace.path, workspace.name);
-        session.ensure(command.options);
-        const sessionId = session.sessionId!;
-
-        const opts = command.options;
-        const details: string[] = [];
-        if (opts.model) details.push(opts.model);
-        if (opts.effort) details.push(opts.effort);
-        const suffix = details.length > 0 ? ` (${details.join(', ')})` : '';
-        const threadName = `[${workspace.name}] Session: ${sessionId.slice(0, 8)}${suffix}`;
-
-        const thread = await channel.threads.create({ name: threadName, autoArchiveDuration: 60 });
-        const ctx = createSession(thread.id, thread, workspace);
-        // createSession 内で新しい Session を作るが、options を引き継ぐために上書き
-        ctx.session.reset();
-        ctx.session.ensure(command.options);
-
-        await persistMapping(thread.id, ctx.session.sessionId!, workspace);
-
-        await thread.send(
-          `セッションを開始しました [\`${ctx.session.sessionId!.slice(0, 8)}\`] — 📁 ${workspace.name}${suffix}`,
-        );
-
-        await interaction.reply({
-          content: `セッションを作成しました → <#${thread.id}>`,
-          ephemeral: true,
-        });
-
-        log(`スレッド作成: ${thread.name} (${thread.id})`);
-      } catch (err) {
-        console.error('Thread creation error:', err);
-        await interaction.reply({ content: 'スレッドの作成に失敗しました', ephemeral: true });
-      }
+      await newCommand.handleCommand(interaction);
       return;
     }
 
     // /cc interrupt — スレッド内で実行した場合のみ処理
     if (subcommand === 'interrupt') {
-      const isThread =
-        interaction.channel?.type === ChannelType.PublicThread ||
-        interaction.channel?.type === ChannelType.PrivateThread;
-
-      if (!isThread) {
-        await interaction.reply({
-          content: 'セッションスレッド内で実行してください',
-          ephemeral: true,
-        });
-        return;
-      }
-
-      const ctx = sessionManager.get(interaction.channelId);
-      if (!ctx) {
-        await interaction.reply({
-          content: 'このスレッドにはセッションが紐づいていません',
-          ephemeral: true,
-        });
-        return;
-      }
-
-      if (ctx.orchestrator.state === 'busy') {
-        ctx.orchestrator.handleCommand({ type: 'interrupt' });
-        await interaction.reply({ content: '✅', ephemeral: true });
-      } else if (ctx.orchestrator.state === 'interrupting') {
-        await interaction.reply({ content: '既に中断処理中です', ephemeral: true });
-      } else {
-        await interaction.reply({ content: '処理中ではありません', ephemeral: true });
-      }
+      await interruptCommand(interaction);
       return;
     }
 
@@ -573,81 +210,7 @@ async function main(): Promise<void> {
 
     // /cc resume — 全ワークスペース横断でセッション一覧を表示
     if (subcommand === 'resume') {
-      await interaction.deferReply({ ephemeral: true });
-
-      try {
-        const workspaces = workspaceStore.list();
-
-        if (workspaces.length === 0) {
-          await interaction.editReply(
-            '⚠️ ワークスペースが登録されていません。`/cc workspace add` で登録してください。',
-          );
-          return;
-        }
-
-        // 全ワークスペースからセッションを収集
-        type SessionWithWorkspace = {
-          workspace: Workspace;
-          sessionId: string;
-          firstUserMessage: string;
-          slug: string | null;
-          lastModified: Date;
-        };
-        const allSessions: SessionWithWorkspace[] = [];
-        for (const ws of workspaces) {
-          const sessions = await sessionStore.listSessions(ws.path);
-          for (const s of sessions) {
-            allSessions.push({ workspace: ws, ...s });
-          }
-        }
-
-        // lastModified 降順でソートし、上位25件
-        allSessions.sort((a, b) => b.lastModified.getTime() - a.lastModified.getTime());
-        const top = allSessions.slice(0, 25);
-
-        if (top.length === 0) {
-          await interaction.editReply('再開できるセッションがありません');
-          return;
-        }
-
-        const selectMenu = new StringSelectMenuBuilder()
-          .setCustomId('cc_resume_select')
-          .setPlaceholder('セッションを選択してください')
-          .addOptions(
-            top.map((s) => {
-              const prefix = `[${s.workspace.name}] `;
-              const cleanMsg = s.firstUserMessage.replace(/\s+/g, ' ').trim();
-              const maxLabelLen = 100 - prefix.length;
-              const baseLabel = s.slug
-                ? s.slug.length > maxLabelLen
-                  ? s.slug.slice(0, maxLabelLen - 3) + '...'
-                  : s.slug
-                : cleanMsg.length > maxLabelLen
-                  ? cleanMsg.slice(0, maxLabelLen - 3) + '...'
-                  : cleanMsg || '(空のメッセージ)';
-              const label = prefix + baseLabel;
-              const desc = s.slug
-                ? cleanMsg.length > 100
-                  ? cleanMsg.slice(0, 97) + '...'
-                  : cleanMsg
-                : formatRelativeDate(s.lastModified);
-              return {
-                label,
-                description: desc || formatRelativeDate(s.lastModified),
-                value: `${s.workspace.name}:${s.sessionId}`,
-              };
-            }),
-          );
-
-        const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
-        await interaction.editReply({
-          content: '再開するセッションを選択してください:',
-          components: [row],
-        });
-      } catch (err) {
-        console.error('Resume session list error:', err);
-        await interaction.editReply('セッション一覧の取得に失敗しました');
-      }
+      await resumeCommand.handleCommand(interaction);
       return;
     }
   });
