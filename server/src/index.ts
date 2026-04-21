@@ -12,13 +12,11 @@ import {
 import { createMessageHandler } from './app/message-handler.js';
 import { toCommand } from './app/interaction-handler.js';
 import { AccessControl } from './domain/access-control.js';
-import { Orchestrator } from './domain/orchestrator.js';
 import { Session } from './domain/session.js';
-import { SessionManager, type SessionContext } from './domain/session-manager.js';
-import type { Notification, ProgressEvent, Workspace } from './domain/types.js';
-import { ClaudeProcess } from './infrastructure/claude-process.js';
+import { SessionManager } from './domain/session-manager.js';
+import type { Workspace } from './domain/types.js';
 import { loadConfig } from './infrastructure/config.js';
-import { createNotifier, type ThreadSender } from './infrastructure/discord-notifier.js';
+import type { ThreadSender } from './infrastructure/discord-notifier.js';
 import { resolvePrompt } from './infrastructure/attachment-resolver.js';
 import { SessionStore } from './infrastructure/session-store.js';
 import { ccCommand } from './infrastructure/slash-commands.js';
@@ -33,13 +31,13 @@ import { ThreadMappingStore } from './infrastructure/thread-mapping-store.js';
 import { TurnStore } from './infrastructure/turn-store.js';
 import { SessionBrancher } from './infrastructure/session-brancher.js';
 import { WorkspaceStore, listDirectories } from './infrastructure/workspace-store.js';
+import { createSessionFactory, createPersistMapping } from './discord/session-factory.js';
 import {
   formatRelativeDate,
   todayJST,
   parseDateInput,
   generateDateChoices,
   log,
-  logNotification,
 } from './helpers.js';
 
 async function main(): Promise<void> {
@@ -87,63 +85,12 @@ async function main(): Promise<void> {
   const turnStore = new TurnStore();
   const sessionBrancher = new SessionBrancher(turnStore);
 
-  /** セッションコンテキストを作成し SessionManager に登録する */
-  function createSession(
-    threadId: string,
-    thread: ThreadSender,
-    workspace: Workspace,
-  ): SessionContext {
-    const session = new Session(workspace.path, workspace.name);
-
-    let onProgress: (event: ProgressEvent) => void = () => {};
-    let onProcessEnd: (exitCode: number, output: string) => void = () => {};
-
-    const claudeProcess = new ClaudeProcess(
-      config.claudePath,
-      (event) => onProgress(event),
-      (exitCode, output) => onProcessEnd(exitCode, output),
-    );
-
-    const notifier = createNotifier(thread);
-    const notify = (notification: Notification): void => {
-      logNotification(notification);
-      notifier.notify(notification);
-    };
-
-    const orchestrator = new Orchestrator(session, claudeProcess, notify, usageFetcher);
-
-    onProgress = (event) => orchestrator.onProgress(event);
-    onProcessEnd = (exitCode, output) => {
-      log(`ClaudeProcess 終了 (exitCode: ${exitCode}, thread: ${threadId})`);
-      orchestrator.onProcessEnd(exitCode, output);
-      notifier.dispose();
-
-      // タイトル生成（非同期・失敗しても無視）
-      if (titleGenerator && session.sessionId) {
-        titleGenerator
-          .generate(session.sessionId, session.workDir)
-          .then((title) => {
-            if (title) {
-              log(`タイトル生成: "${title}" (thread: ${threadId})`);
-              thread
-                .setName(title)
-                .catch((err: unknown) => console.error('Thread setName error:', err));
-            }
-          })
-          .catch((err) => console.error('Title generation error:', err));
-      }
-    };
-
-    const ctx: SessionContext = {
-      orchestrator,
-      session,
-      claudeProcess,
-      threadId,
-      setAuthorId: (authorId) => notifier.setAuthorId(authorId),
-    };
-    sessionManager.register(threadId, ctx);
-    return ctx;
-  }
+  const createSession = createSessionFactory({
+    config,
+    sessionManager,
+    usageFetcher,
+    titleGenerator,
+  });
 
   const sessionRestorer = new SessionRestorer({
     threadMappingStore,
@@ -152,18 +99,7 @@ async function main(): Promise<void> {
     log,
   });
 
-  /** マッピングをディスクに永続化する */
-  function persistMapping(
-    threadId: string,
-    sessionId: string,
-    workspace: Workspace,
-  ): Promise<void> {
-    return threadMappingStore.set(threadId, {
-      sessionId,
-      workDir: workspace.path,
-      workspaceName: workspace.name,
-    });
-  }
+  const persistMapping = createPersistMapping(threadMappingStore);
 
   // App 層
   const handleMessage = createMessageHandler(accessControl, sessionManager);
