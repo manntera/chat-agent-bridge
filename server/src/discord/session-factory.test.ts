@@ -245,9 +245,10 @@ describe('createSessionFactory', () => {
       expect(thread.setName).not.toHaveBeenCalled();
     });
 
-    it('titleGenerator.generate が reject してもエラーを伝播させない', async () => {
+    it('titleGenerator.generate が reject した場合は console.error で記録し、伝播させない', async () => {
       const titleGenerator = createMockTitleGenerator();
-      vi.mocked(titleGenerator.generate).mockRejectedValueOnce(new Error('API error'));
+      const apiError = new Error('API error');
+      vi.mocked(titleGenerator.generate).mockRejectedValueOnce(apiError);
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       const createSession = createSessionFactory({
@@ -265,12 +266,14 @@ describe('createSessionFactory', () => {
 
       await flushAsync();
       expect(thread.setName).not.toHaveBeenCalled();
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Title generation error:', apiError);
       consoleErrorSpy.mockRestore();
     });
 
-    it('thread.setName が reject してもエラーを伝播させない', async () => {
+    it('thread.setName が reject した場合は console.error で記録し、伝播させない', async () => {
       const titleGenerator = createMockTitleGenerator();
-      vi.mocked(thread.setName).mockRejectedValueOnce(new Error('Discord error'));
+      const discordError = new Error('Discord error');
+      vi.mocked(thread.setName).mockRejectedValueOnce(discordError);
       const consoleErrorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
 
       const createSession = createSessionFactory({
@@ -287,7 +290,8 @@ describe('createSessionFactory', () => {
       mockProc.onProcessEnd(0, 'output');
 
       await flushAsync();
-      // 例外が伝播しなければ成功
+      expect(thread.setName).toHaveBeenCalled();
+      expect(consoleErrorSpy).toHaveBeenCalledWith('Thread setName error:', discordError);
       consoleErrorSpy.mockRestore();
     });
   });

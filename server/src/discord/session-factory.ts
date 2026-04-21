@@ -34,6 +34,10 @@ export function createSessionFactory(deps: SessionFactoryDeps): CreateSessionFn 
   return (threadId, thread, workspace) => {
     const session = new Session(workspace.path, workspace.name);
 
+    // Orchestrator は ClaudeProcess を必要とし、ClaudeProcess のコールバックは
+    // Orchestrator を必要とする循環依存のため、ここで no-op プレースホルダを作り、
+    // Orchestrator 生成後に再代入する (ClaudeProcess.spawn() が呼ばれるのは
+    // Orchestrator 経由なので、実行時に no-op が呼ばれることはない)。
     let onProgress: (event: ProgressEvent) => void = () => {};
     let onProcessEnd: (exitCode: number, output: string) => void = () => {};
 
