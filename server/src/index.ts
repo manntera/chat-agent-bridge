@@ -31,6 +31,7 @@ import { WorkspaceStore } from './infrastructure/workspace-store.js';
 import { createSessionFactory, createPersistMapping } from './discord/session-factory.js';
 import { createRewindHandler } from './discord/rewind-handler.js';
 import { createMessageController } from './discord/message-controller.js';
+import { createInterruptCommand } from './discord/commands/interrupt.js';
 import { createWorkspaceCommands } from './discord/commands/workspace.js';
 import {
   formatRelativeDate,
@@ -114,6 +115,8 @@ async function main(): Promise<void> {
     handleMessage,
   });
   client.on(Events.MessageCreate, messageController);
+
+  const interruptCommand = createInterruptCommand({ sessionManager });
 
   // /cc new のワークスペース選択待ち中の options を一時保持
   const pendingNewOptions = new Map<string, import('./domain/types.js').SessionOptions>();
@@ -386,35 +389,7 @@ async function main(): Promise<void> {
 
     // /cc interrupt — スレッド内で実行した場合のみ処理
     if (subcommand === 'interrupt') {
-      const isThread =
-        interaction.channel?.type === ChannelType.PublicThread ||
-        interaction.channel?.type === ChannelType.PrivateThread;
-
-      if (!isThread) {
-        await interaction.reply({
-          content: 'セッションスレッド内で実行してください',
-          ephemeral: true,
-        });
-        return;
-      }
-
-      const ctx = sessionManager.get(interaction.channelId);
-      if (!ctx) {
-        await interaction.reply({
-          content: 'このスレッドにはセッションが紐づいていません',
-          ephemeral: true,
-        });
-        return;
-      }
-
-      if (ctx.orchestrator.state === 'busy') {
-        ctx.orchestrator.handleCommand({ type: 'interrupt' });
-        await interaction.reply({ content: '✅', ephemeral: true });
-      } else if (ctx.orchestrator.state === 'interrupting') {
-        await interaction.reply({ content: '既に中断処理中です', ephemeral: true });
-      } else {
-        await interaction.reply({ content: '処理中ではありません', ephemeral: true });
-      }
+      await interruptCommand(interaction);
       return;
     }
 
