@@ -1,17 +1,7 @@
 import 'dotenv/config';
-import {
-  ActionRowBuilder,
-  Client,
-  ChannelType,
-  Events,
-  GatewayIntentBits,
-  StringSelectMenuBuilder,
-  TextChannel,
-} from 'discord.js';
+import { Client, ChannelType, Events, GatewayIntentBits, TextChannel } from 'discord.js';
 import { createMessageHandler } from './app/message-handler.js';
-import { toCommand } from './app/interaction-handler.js';
 import { AccessControl } from './domain/access-control.js';
-import { Session } from './domain/session.js';
 import { SessionManager } from './domain/session-manager.js';
 import type { Workspace } from './domain/types.js';
 import { loadConfig } from './infrastructure/config.js';
@@ -32,6 +22,7 @@ import { createSessionFactory, createPersistMapping } from './discord/session-fa
 import { createRewindHandler } from './discord/rewind-handler.js';
 import { createMessageController } from './discord/message-controller.js';
 import { createInterruptCommand } from './discord/commands/interrupt.js';
+import { createNewCommand } from './discord/commands/new.js';
 import { createResumeCommand } from './discord/commands/resume.js';
 import { createWorkspaceCommands } from './discord/commands/workspace.js';
 import { todayJST, parseDateInput, generateDateChoices, log } from './helpers.js';
@@ -112,6 +103,12 @@ async function main(): Promise<void> {
   client.on(Events.MessageCreate, messageController);
 
   const interruptCommand = createInterruptCommand({ sessionManager });
+  const newCommand = createNewCommand({
+    workspaceStore,
+    createSession,
+    persistMapping,
+    channel,
+  });
   const resumeCommand = createResumeCommand({
     workspaceStore,
     sessionStore,
@@ -120,9 +117,6 @@ async function main(): Promise<void> {
     persistMapping,
     channel,
   });
-
-  // /cc new のワークスペース選択待ち中の options を一時保持
-  const pendingNewOptions = new Map<string, import('./domain/types.js').SessionOptions>();
 
   const workspaceCommands = createWorkspaceCommands({
     workspaceStore,
@@ -152,60 +146,8 @@ async function main(): Promise<void> {
     }
 
     // StringSelectMenu の選択イベント（/cc new のワークスペース選択）
-    if (interaction.isStringSelectMenu() && interaction.customId === 'cc_workspace_select') {
-      const wsName = interaction.values[0];
-      const workspace = workspaceStore.findByName(wsName);
-
-      if (!workspace) {
-        await interaction.update({
-          content: `ワークスペース「${wsName}」が見つかりません`,
-          components: [],
-        });
-        return;
-      }
-
-      // customId から options を復元
-      // options は cc_workspace_select_<model>_<effort> の形式でエンコード済み
-      // → 別のアプローチ: pendingOptions マップを使用
-      const pending = pendingNewOptions.get(interaction.user.id);
-      pendingNewOptions.delete(interaction.user.id);
-
-      try {
-        const opts = pending ?? {};
-        const session = new Session(workspace.path, workspace.name);
-        session.ensure(opts);
-        const sessionId = session.sessionId!;
-
-        const details: string[] = [];
-        if (opts.model) details.push(opts.model);
-        if (opts.effort) details.push(opts.effort);
-        const suffix = details.length > 0 ? ` (${details.join(', ')})` : '';
-        const threadName = `[${workspace.name}] Session: ${sessionId.slice(0, 8)}${suffix}`;
-
-        const thread = await channel.threads.create({ name: threadName, autoArchiveDuration: 60 });
-        const ctx = createSession(thread.id, thread, workspace);
-        ctx.session.reset();
-        ctx.session.ensure(opts);
-
-        await persistMapping(thread.id, ctx.session.sessionId!, workspace);
-
-        await thread.send(
-          `セッションを開始しました [\`${ctx.session.sessionId!.slice(0, 8)}\`] — 📁 ${workspace.name}${suffix}`,
-        );
-
-        await interaction.update({
-          content: `セッションを作成しました → <#${thread.id}>`,
-          components: [],
-        });
-
-        log(`スレッド作成: ${thread.name} (${thread.id})`);
-      } catch (err) {
-        console.error('Thread creation error:', err);
-        await interaction.update({
-          content: 'スレッドの作成に失敗しました',
-          components: [],
-        });
-      }
+    if (interaction.isStringSelectMenu() && interaction.customId === newCommand.customId) {
+      await newCommand.handleSelect(interaction);
       return;
     }
 
@@ -255,90 +197,7 @@ async function main(): Promise<void> {
 
     // /cc new — スレッドを作成してセッションを登録
     if (subcommand === 'new') {
-      const command = toCommand({
-        authorBot: false,
-        authorId: interaction.user.id,
-        channelId: interaction.channelId,
-        subcommand: 'new',
-        model: interaction.options.getString('model') ?? undefined,
-        effort: interaction.options.getString('effort') ?? undefined,
-        threadId: null,
-      });
-      if (!command || command.type !== 'new') return;
-
-      const workspaces = workspaceStore.list();
-
-      // ワークスペースが 0 件
-      if (workspaces.length === 0) {
-        await interaction.reply({
-          content:
-            '⚠️ ワークスペースが登録されていません。`/cc workspace add` で登録してください。',
-          ephemeral: true,
-        });
-        return;
-      }
-
-      // ワークスペースが 2 件以上 → セレクトメニュー
-      if (workspaces.length >= 2) {
-        // options を一時保存
-        pendingNewOptions.set(interaction.user.id, command.options);
-
-        const selectMenu = new StringSelectMenuBuilder()
-          .setCustomId('cc_workspace_select')
-          .setPlaceholder('ワークスペースを選択してください')
-          .addOptions(
-            workspaces.map((w) => ({
-              label: w.name,
-              description: w.path,
-              value: w.name,
-            })),
-          );
-
-        const row = new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu);
-        await interaction.reply({
-          content: '作業ディレクトリを選択してください:',
-          components: [row],
-          ephemeral: true,
-        });
-        return;
-      }
-
-      // ワークスペースが 1 件 → 自動選択
-      const workspace = workspaces[0];
-      try {
-        const session = new Session(workspace.path, workspace.name);
-        session.ensure(command.options);
-        const sessionId = session.sessionId!;
-
-        const opts = command.options;
-        const details: string[] = [];
-        if (opts.model) details.push(opts.model);
-        if (opts.effort) details.push(opts.effort);
-        const suffix = details.length > 0 ? ` (${details.join(', ')})` : '';
-        const threadName = `[${workspace.name}] Session: ${sessionId.slice(0, 8)}${suffix}`;
-
-        const thread = await channel.threads.create({ name: threadName, autoArchiveDuration: 60 });
-        const ctx = createSession(thread.id, thread, workspace);
-        // createSession 内で新しい Session を作るが、options を引き継ぐために上書き
-        ctx.session.reset();
-        ctx.session.ensure(command.options);
-
-        await persistMapping(thread.id, ctx.session.sessionId!, workspace);
-
-        await thread.send(
-          `セッションを開始しました [\`${ctx.session.sessionId!.slice(0, 8)}\`] — 📁 ${workspace.name}${suffix}`,
-        );
-
-        await interaction.reply({
-          content: `セッションを作成しました → <#${thread.id}>`,
-          ephemeral: true,
-        });
-
-        log(`スレッド作成: ${thread.name} (${thread.id})`);
-      } catch (err) {
-        console.error('Thread creation error:', err);
-        await interaction.reply({ content: 'スレッドの作成に失敗しました', ephemeral: true });
-      }
+      await newCommand.handleCommand(interaction);
       return;
     }
 
