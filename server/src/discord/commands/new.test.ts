@@ -325,8 +325,8 @@ describe('createNewCommand', () => {
       expect(createCalls[0].name).not.toContain('(');
     });
 
-    it('WS 1 件: invalid な effort ("low" 等) は options から落とされ、スレッド名にも出ない', async () => {
-      // toCommand 内部の VALID_EFFORTS で弾かれる仕様 (medium/high/max のみ)。
+    it('WS 1 件: invalid な effort は options から落とされ、スレッド名にも出ない', async () => {
+      // toCommand 内部の VALID_EFFORTS で弾かれる仕様 (low/medium/high/xhigh/max のみ)。
       const { channel, createCalls } = makeChannel();
       const cmd = createNewCommand({
         workspaceStore: makeWorkspaceStore([WS_A]),
@@ -335,10 +335,10 @@ describe('createNewCommand', () => {
         channel,
       });
 
-      const i = makeCommandInteraction({ effort: 'low' });
+      const i = makeCommandInteraction({ effort: 'unknown_effort' });
       await cmd.handleCommand(coerceCommand(i));
 
-      expect(createCalls[0].name).not.toContain('low');
+      expect(createCalls[0].name).not.toContain('unknown_effort');
     });
 
     it('WS 2 件以上: SelectMenu を reply で返し、スレッドは作らない', async () => {

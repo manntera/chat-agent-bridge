@@ -47,13 +47,13 @@ describe('ccCommand', () => {
     expect(names).toContain('list');
   });
 
-  it('"new" サブコマンドに effort オプションがある（3つの選択肢）', () => {
+  it('"new" サブコマンドに effort オプションがある（5つの選択肢）', () => {
     const sub = json.options?.find((o) => o.name === 'new') as Record<string, unknown>;
     const options = sub?.options as Array<Record<string, unknown>>;
     const effortOpt = options?.find((o) => o.name === 'effort');
     expect(effortOpt).toBeDefined();
     expect(effortOpt?.required).toBe(false);
     const choices = effortOpt?.choices as Array<Record<string, string>>;
-    expect(choices?.map((c) => c.value)).toEqual(['medium', 'high', 'max']);
+    expect(choices?.map((c) => c.value)).toEqual(['low', 'medium', 'high', 'xhigh', 'max']);
   });
 });

@@ -114,6 +114,16 @@ describe('toCommand', () => {
     expect(cmd).toEqual({ type: 'new', options: { effort: 'high' } });
   });
 
+  it('low effort が受理される', () => {
+    const cmd = toCommand(validInteraction('new', { effort: 'low' }));
+    expect(cmd).toEqual({ type: 'new', options: { effort: 'low' } });
+  });
+
+  it('xhigh effort が受理される', () => {
+    const cmd = toCommand(validInteraction('new', { effort: 'xhigh' }));
+    expect(cmd).toEqual({ type: 'new', options: { effort: 'xhigh' } });
+  });
+
   it('report → null（index.ts で処理）', () => {
     const cmd = toCommand(validInteraction('report'));
     expect(cmd).toBeNull();
