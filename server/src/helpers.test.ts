@@ -14,7 +14,7 @@ import type { UsageInfo } from './domain/types.js';
 describe('formatRelativeDate', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-03-22T12:00:00Z'));
+    vi.setSystemTime(new Date('2026-03-22T21:00:00+09:00'));
   });
 
   afterEach(() => {
@@ -22,27 +22,27 @@ describe('formatRelativeDate', () => {
   });
 
   it('1分未満は「たった今」', () => {
-    const date = new Date('2026-03-22T11:59:30Z');
+    const date = new Date('2026-03-22T20:59:30+09:00');
     expect(formatRelativeDate(date)).toBe('たった今');
   });
 
   it('1分〜60分未満は「N分前」', () => {
-    const date = new Date('2026-03-22T11:30:00Z');
+    const date = new Date('2026-03-22T20:30:00+09:00');
     expect(formatRelativeDate(date)).toBe('30分前');
   });
 
   it('1時間〜24時間未満は「N時間前」', () => {
-    const date = new Date('2026-03-22T06:00:00Z');
+    const date = new Date('2026-03-22T15:00:00+09:00');
     expect(formatRelativeDate(date)).toBe('6時間前');
   });
 
   it('1日〜30日未満は「N日前」', () => {
-    const date = new Date('2026-03-20T12:00:00Z');
+    const date = new Date('2026-03-20T21:00:00+09:00');
     expect(formatRelativeDate(date)).toBe('2日前');
   });
 
   it('30日以上は日付文字列', () => {
-    const date = new Date('2026-01-01T00:00:00Z');
+    const date = new Date('2026-01-01T09:00:00+09:00');
     const result = formatRelativeDate(date);
     expect(result).toMatch(/2026/);
   });
@@ -55,8 +55,7 @@ describe('todayJST', () => {
 
   it('JST 6時以降は当日を返す', () => {
     vi.useFakeTimers();
-    // UTC 00:00 = JST 09:00
-    vi.setSystemTime(new Date('2026-03-22T00:00:00Z'));
+    vi.setSystemTime(new Date('2026-03-22T09:00:00+09:00'));
     const result = todayJST();
     const jstDate = new Date(result.getTime() + 9 * 60 * 60 * 1000);
     expect(jstDate.getUTCDate()).toBe(22);
@@ -64,8 +63,8 @@ describe('todayJST', () => {
 
   it('JST 6時前は前日扱い', () => {
     vi.useFakeTimers();
-    // UTC 20:00 = JST 翌日05:00 → 前日扱い
-    vi.setSystemTime(new Date('2026-03-21T20:00:00Z'));
+    // JST 05:00 → 前日扱い
+    vi.setSystemTime(new Date('2026-03-22T05:00:00+09:00'));
     const result = todayJST();
     const jstDate = new Date(result.getTime() + 9 * 60 * 60 * 1000);
     expect(jstDate.getUTCDate()).toBe(21);
@@ -97,14 +96,14 @@ describe('parseDateInput', () => {
 
   it('相対指定 0 は今日を返す', () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-03-22T00:00:00Z'));
+    vi.setSystemTime(new Date('2026-03-22T09:00:00+09:00'));
     const result = parseDateInput('0');
     expect(result).not.toBeNull();
   });
 
   it('相対指定 -1 は昨日を返す', () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-03-22T00:00:00Z'));
+    vi.setSystemTime(new Date('2026-03-22T09:00:00+09:00'));
     const today = parseDateInput('0');
     const yesterday = parseDateInput('-1');
     expect(today!.getTime() - yesterday!.getTime()).toBe(24 * 60 * 60 * 1000);
@@ -112,7 +111,7 @@ describe('parseDateInput', () => {
 
   it('相対指定 +1 は明日を返す', () => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-03-22T00:00:00Z'));
+    vi.setSystemTime(new Date('2026-03-22T09:00:00+09:00'));
     const today = parseDateInput('0');
     const tomorrow = parseDateInput('+1');
     expect(tomorrow!.getTime() - today!.getTime()).toBe(24 * 60 * 60 * 1000);
@@ -126,7 +125,7 @@ describe('parseDateInput', () => {
 describe('generateDateChoices', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    vi.setSystemTime(new Date('2026-03-22T00:00:00Z'));
+    vi.setSystemTime(new Date('2026-03-22T09:00:00+09:00'));
   });
 
   afterEach(() => {

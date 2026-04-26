@@ -1,18 +1,30 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type { AutocompleteInteraction, ChatInputCommandInteraction } from 'discord.js';
 import type { SessionSummary, Workspace } from '../../domain/types.js';
 import type { DailySession, IReportGenerator } from '../../infrastructure/report-generator.js';
 import type { ConversationEntry } from '../../infrastructure/session-reader.js';
 import { createReportCommand, sendReport, type ReportChannel } from './report.js';
 
-// helpers.ts の日付系関数はモックで時刻を固定
+// helpers.ts の log のみモック化。日付固定は vi.setSystemTime で行う
+// (todayJST を直接モックすると、helpers.ts 内の parseDateInput など他関数からの
+//  内部呼び出しがモックを経由せず実時刻を参照してしまうため)
 vi.mock('../../helpers.js', async () => {
   const actual = await vi.importActual<typeof import('../../helpers.js')>('../../helpers.js');
   return {
     ...actual,
-    todayJST: vi.fn(() => new Date('2026-04-21T00:00:00+09:00')),
     log: vi.fn(),
   };
+});
+
+// 全テストで現在時刻を 2026-04-21 12:00 JST に固定
+// (JST 06:00 前は todayJST() が前日扱いするため、安全に正午で固定)
+beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(new Date('2026-04-21T12:00:00+09:00'));
+});
+
+afterEach(() => {
+  vi.useRealTimers();
 });
 
 vi.mock('../../infrastructure/session-reader.js', () => ({
