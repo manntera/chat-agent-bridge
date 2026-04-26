@@ -81,7 +81,7 @@ type Command =
 `SessionOptions` 型を導入し、セッション開始時にモデルと思考深度を指定できるようにした。
 
 ```typescript
-type Effort = 'medium' | 'high' | 'max';
+type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 interface SessionOptions {
   model?: string;    // 'sonnet' | 'opus' | 'haiku'

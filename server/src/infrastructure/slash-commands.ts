@@ -21,11 +21,13 @@ export const ccCommand = new SlashCommandBuilder()
       .addStringOption((opt) =>
         opt
           .setName('effort')
-          .setDescription('思考の深さ')
+          .setDescription('思考の深さ (非対応モデルでは自動的に近い下位レベルにフォールバック)')
           .setRequired(false)
           .addChoices(
+            { name: 'low', value: 'low' },
             { name: 'medium', value: 'medium' },
             { name: 'high', value: 'high' },
+            { name: 'xhigh (Opus 4.7 専用)', value: 'xhigh' },
             { name: 'max', value: 'max' },
           ),
       ),

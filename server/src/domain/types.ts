@@ -1,6 +1,6 @@
 export type OrchestratorState = 'initial' | 'idle' | 'busy' | 'interrupting';
 
-export type Effort = 'medium' | 'high' | 'max';
+export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
 
 export interface SessionOptions {
   model?: string;

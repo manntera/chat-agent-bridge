@@ -11,7 +11,7 @@ export interface InteractionContext extends MessageContext {
 
 export type InteractionHandlerFn = (context: InteractionContext) => void;
 
-const VALID_EFFORTS = new Set<string>(['medium', 'high', 'max']);
+const VALID_EFFORTS = new Set<string>(['low', 'medium', 'high', 'xhigh', 'max']);
 
 export function toCommand(context: InteractionContext): Command | null {
   switch (context.subcommand) {

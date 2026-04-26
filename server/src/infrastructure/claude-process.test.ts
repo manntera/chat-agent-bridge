@@ -125,6 +125,17 @@ describe('ClaudeProcess', () => {
       expect(args).toContain('max');
     });
 
+    it('effort: xhigh が --effort xhigh として渡される', () => {
+      const ctx = createTestContext();
+
+      ctx.claudeProcess.spawn('hello', 'session-123', '/work', false, { effort: 'xhigh' });
+
+      const args = ctx.mockSpawnFn.mock.calls[0][1];
+      const idx = args.indexOf('--effort');
+      expect(idx).toBeGreaterThanOrEqual(0);
+      expect(args[idx + 1]).toBe('xhigh');
+    });
+
     it('オプション未指定時に --model / --effort が含まれない', () => {
       const ctx = createTestContext();
 
