@@ -9,7 +9,7 @@ import {
   logNotification,
   formatUsageParts,
 } from './helpers.js';
-import type { UsageInfo } from './domain/types.js';
+import type { UsageInfo } from './core/types.js';
 
 describe('formatRelativeDate', () => {
   beforeEach(() => {
