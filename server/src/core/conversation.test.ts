@@ -171,6 +171,8 @@ describe('processEnded', () => {
     expect(state.interruptReason).toBeNull();
     const n = notifications(effects)[0];
     expect((n as { message: string }).message).toBe('中断しました');
+    // 中断時はタイトル生成などの後処理(turnCompleted)を行わない
+    expect(effectTypes(effects)).toEqual(['notify', 'fetchUsage']);
   });
 
   it('new 起因: pendingNew のセッションへ切り替わる', () => {

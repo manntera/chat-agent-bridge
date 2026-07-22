@@ -249,7 +249,11 @@ export function reduce(state: ConversationState, event: ConversationEvent): Redu
         effects.push(notify({ type: 'error', message: event.output, exitCode: event.exitCode }));
       }
 
-      effects.push({ type: 'fetchUsage' }, { type: 'turnCompleted' });
+      effects.push({ type: 'fetchUsage' });
+      // 中断・セッション切替時はターン成果がないため、タイトル生成などの後処理は行わない
+      if (state.interruptReason === null) {
+        effects.push({ type: 'turnCompleted' });
+      }
 
       // 正常完了でキューに残りがあれば次のプロンプトを自動実行する
       if (state.interruptReason === null && state.queue.length > 0) {
