@@ -35,7 +35,7 @@ Claude Code への指示や結果はすべて Discord のスレッドに残り�
 
 - Node.js 18 以上
 - [pnpm](https://pnpm.io/)
-- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) **2.1.117 以降** (`xhigh` effort 対応)。`claude --version` で確認、古い場合は `claude update` を実行
+- [Claude Code CLI](https://docs.anthropic.com/en/docs/claude-code) **2.1.217 以降** (`fable` モデルエイリアス対応)。`claude --version` で確認、古い場合は `claude update` を実行
 - Discord Bot トークン（[Discord Developer Portal](https://discord.com/developers/applications) で取得）
 - （任意）Gemini API キー — 日報生成・スレッドタイトル自動生成に必要
 
@@ -99,7 +99,7 @@ pnpm start
 
 **セッション操作**
 
-- `/cc new` — 新しいセッション（スレッド）を作成。`model`（sonnet / opus / haiku）と `effort`（low / medium / high / xhigh / max）をオプションで指定可能。`xhigh` は Opus 4.7 専用、非対応モデルの場合は CLI が自動的に近い下位レベルへフォールバック。ワークスペースが複数ある場合はセレクトメニューで選択
+- `/cc new` — 新しいセッション（スレッド）を作成。`model`（fable / opus / sonnet / haiku）と `effort`（low / medium / high / xhigh / max）をオプションで指定可能。`xhigh` は Claude Code のデフォルトで、コーディング・エージェント用途の推奨値。非対応モデル（haiku 等）の場合は CLI が自動的に近い下位レベルへフォールバック。ワークスペースが複数ある場合はセレクトメニューで選択
 - `/cc resume` — 過去のセッションを選択して再開（直近 25 件から選択）
 - `/cc interrupt` — 実行中の処理を中断（セッションスレッド内で実行）
 
