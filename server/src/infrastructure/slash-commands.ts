@@ -13,9 +13,10 @@ export const ccCommand = new SlashCommandBuilder()
           .setDescription('使用するモデル')
           .setRequired(false)
           .addChoices(
-            { name: 'sonnet', value: 'sonnet' },
-            { name: 'opus', value: 'opus' },
-            { name: 'haiku', value: 'haiku' },
+            { name: 'fable (最高性能)', value: 'fable' },
+            { name: 'opus (高性能)', value: 'opus' },
+            { name: 'sonnet (バランス)', value: 'sonnet' },
+            { name: 'haiku (高速・低コスト)', value: 'haiku' },
           ),
       )
       .addStringOption((opt) =>
@@ -27,7 +28,7 @@ export const ccCommand = new SlashCommandBuilder()
             { name: 'low', value: 'low' },
             { name: 'medium', value: 'medium' },
             { name: 'high', value: 'high' },
-            { name: 'xhigh (Opus 4.7 専用)', value: 'xhigh' },
+            { name: 'xhigh (デフォルト・推奨)', value: 'xhigh' },
             { name: 'max', value: 'max' },
           ),
       ),

@@ -23,14 +23,14 @@ describe('ccCommand', () => {
     expect(sub).toBeDefined();
   });
 
-  it('"new" サブコマンドに model オプションがある（3つの選択肢）', () => {
+  it('"new" サブコマンドに model オプションがある（4つの選択肢）', () => {
     const sub = json.options?.find((o) => o.name === 'new') as Record<string, unknown>;
     const options = sub?.options as Array<Record<string, unknown>>;
     const modelOpt = options?.find((o) => o.name === 'model');
     expect(modelOpt).toBeDefined();
     expect(modelOpt?.required).toBe(false);
     const choices = modelOpt?.choices as Array<Record<string, string>>;
-    expect(choices?.map((c) => c.value)).toEqual(['sonnet', 'opus', 'haiku']);
+    expect(choices?.map((c) => c.value)).toEqual(['fable', 'opus', 'sonnet', 'haiku']);
   });
 
   it('サブコマンドグループ "workspace" が定義されている', () => {
