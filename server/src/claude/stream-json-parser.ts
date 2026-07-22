@@ -56,6 +56,8 @@ export function parseStreamJsonLine(line: string): ParsedEvent {
     }
 
     if (first.type === 'thinking' && typeof first.thinking === 'string') {
+      // adaptive thinking (display: omitted) では thinking 本文が空で届くため通知しない
+      if (first.thinking.trim() === '') return IGNORED;
       return {
         kind: 'progress',
         event: { kind: 'thinking', text: first.thinking },

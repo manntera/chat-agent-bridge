@@ -166,6 +166,12 @@ describe('parseStreamJsonLine', () => {
       });
     });
 
+    it('thinking 本文が空 → ignored(adaptive thinking の display: omitted)', () => {
+      const line = assistantEvent([{ type: 'thinking', thinking: '', signature: 'sig_test' }]);
+
+      expect(parseStreamJsonLine(line)).toEqual({ kind: 'ignored' });
+    });
+
     it('message.content が空 → ignored', () => {
       const line = assistantEvent([]);
 

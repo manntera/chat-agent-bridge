@@ -5,6 +5,7 @@ import {
   Client,
   Events,
   GatewayIntentBits,
+  MessageFlags,
   StringSelectMenuBuilder,
   TextChannel,
   type AutocompleteInteraction,
@@ -163,7 +164,7 @@ export async function startDiscordAdapter(
     if (workspaces.length === 0) {
       await interaction.reply({
         content: '⚠️ ワークスペースが登録されていません。`/cc workspace add` で登録してください。',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -177,7 +178,7 @@ export async function startDiscordAdapter(
       await interaction.reply({
         content: '作業ディレクトリを選択してください:',
         components: [new ActionRowBuilder<StringSelectMenuBuilder>().addComponents(selectMenu)],
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -186,11 +187,14 @@ export async function startDiscordAdapter(
       const { threadId } = await createThreadAndConversation(workspaces[0], options);
       await interaction.reply({
         content: `セッションを作成しました → <#${threadId}>`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
     } catch (err) {
       console.error('Thread creation error:', err);
-      await interaction.reply({ content: 'スレッドの作成に失敗しました', ephemeral: true });
+      await interaction.reply({
+        content: 'スレッドの作成に失敗しました',
+        flags: MessageFlags.Ephemeral,
+      });
     }
   }
 
@@ -223,7 +227,7 @@ export async function startDiscordAdapter(
   // ---- /cc resume ----
 
   async function handleResumeCommand(interaction: ChatInputCommandInteraction): Promise<void> {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     try {
       if (workspaceStore.list().length === 0) {
@@ -319,7 +323,7 @@ export async function startDiscordAdapter(
     if (!isThreadChannel(interaction.channel?.type)) {
       await interaction.reply({
         content: 'セッションスレッド内で実行してください',
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -331,7 +335,7 @@ export async function startDiscordAdapter(
       'not-busy': '処理中ではありません',
       'no-session': 'このスレッドにはセッションが紐づいていません',
     } as const;
-    await interaction.reply({ content: replies[result], ephemeral: true });
+    await interaction.reply({ content: replies[result], flags: MessageFlags.Ephemeral });
   }
 
   // ---- /cc report ----
@@ -417,12 +421,12 @@ export async function startDiscordAdapter(
           workspaceStore.add({ name: wsName, path });
           await interaction.reply({
             content: `✅ ワークスペース「${wsName}」を登録しました (${path})`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
         } catch (err) {
           await interaction.reply({
             content: `⚠️ ${err instanceof Error ? err.message : '登録に失敗しました'}`,
-            ephemeral: true,
+            flags: MessageFlags.Ephemeral,
           });
         }
         return;
@@ -432,7 +436,7 @@ export async function startDiscordAdapter(
       await interaction.reply({
         content: `📂 ${workspaceBaseDir}`,
         components: [buildBrowseMenu(workspaceBaseDir)],
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -444,7 +448,7 @@ export async function startDiscordAdapter(
         content: removed
           ? `✅ ワークスペース「${name}」を削除しました`
           : `⚠️ ワークスペース「${name}」が見つかりません`,
-        ephemeral: true,
+        flags: MessageFlags.Ephemeral,
       });
       return;
     }
@@ -454,13 +458,13 @@ export async function startDiscordAdapter(
       if (workspaces.length === 0) {
         await interaction.reply({
           content: 'ワークスペースが登録されていません。`/cc workspace add` で登録してください。',
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       } else {
         const lines = workspaces.map((w, i) => `${i + 1}. **${w.name}** — ${w.path}`);
         await interaction.reply({
           content: `📁 登録済みワークスペース:\n${lines.join('\n')}`,
-          ephemeral: true,
+          flags: MessageFlags.Ephemeral,
         });
       }
     }
@@ -553,7 +557,7 @@ export async function startDiscordAdapter(
         channelId: checkChannelId,
       })
     ) {
-      await interaction.reply({ content: '権限がありません', ephemeral: true });
+      await interaction.reply({ content: '権限がありません', flags: MessageFlags.Ephemeral });
       return;
     }
 
