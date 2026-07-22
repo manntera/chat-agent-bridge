@@ -1,7 +1,7 @@
 {
   "name": "chat-agent-bridge",
   "version": "1.0.0",
-  "description": "Discord Bot bridge for remote ClaudeCode operation",
+  "description": "Multi-platform chat bridge for remote Claude Code operation",
   "type": "module",
   "scripts": {
     "dev": "tsx src/index.ts",

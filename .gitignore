@@ -1,2 +1,5 @@
 /node_modules
 workspaces.json
+bridge.db
+bridge.db-*
+thread-sessions.json

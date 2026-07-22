@@ -1,4 +1,4 @@
-import type { Notification, UsageInfo } from './domain/types.js';
+import type { Notification, UsageInfo } from './core/types.js';
 
 export function formatRelativeDate(date: Date): string {
   const diffMs = Date.now() - date.getTime();
